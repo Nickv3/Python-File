@@ -1,5 +1,6 @@
 #Files to ignore
 testing.ipynb
+venv/
 
 #File-types to ignore
 *.png

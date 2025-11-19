@@ -1,20 +1,20 @@
 #Calculate the final matrix element for a set of external points
 def calculate_matrix_element(external_points):
     combined_current  = calculate_combined_current(external_points[1:])
-    matrix_element = 1 * 1 / calculate_propagator(external_points) * combined_current
-    print(abs(matrix_element)**2)
+    matrix_element = 1 * 1 / calculate_propagator(external_points[1:]) * combined_current
+    return abs(matrix_element)**2
 
 
 
 #Calculate the combined current for a set of external points J_{12...n}
 def calculate_combined_current(external_points, lambda_0 = 0.01):
     no_external_points = len(external_points)
-    print(no_external_points)
+    #print(no_external_points)
     J_values = {}
     #Create single particle currents
     J_1 = np.array([1] * no_external_points)
     J_values["J_1"] = J_1
-    print(J_values)
+    #print(J_values)
 
     #Create arbitrary dimensional particle currents
     for n in range(2, no_external_points + 1):
@@ -26,10 +26,12 @@ def calculate_combined_current(external_points, lambda_0 = 0.01):
             current_sum = 0
             for (pi_1, pi_2) in current_combinations:                                               #Iterate over all current combinations
                 current_sum += J_values[f"J_{len(pi_1)}"][pi_1]*J_values[f"J_{len(pi_2)}"][pi_2]    #Sum the product of the two sub-currents
-            J[current_indices] = calculate_propagator(prop_external_points) * current_sum           #Calculate the n-particle current value
+            #print(prop_external_points)
+            #print(calculate_propagator(prop_external_points))
+            J[current_indices] = calculate_propagator(prop_external_points) * (1j * lambda_0) * current_sum           #Calculate the n-particle current value
         J_values[f"J_{n}"] = J
     
-    print(J_values)
+    #print(J_values)
     return J_values[f"J_{no_external_points}"][current_indices]
 
 
@@ -65,6 +67,7 @@ if True:
     #Import modules
     import numpy as np
     from itertools import combinations        #For generating index combinations for particle currents
+    import matplotlib.pyplot as plt
 
 
 
@@ -72,17 +75,27 @@ if True:
     E = 100
     p = 2
     m = p
-    theta = np.pi/2
+    theta_list = np.linspace(0, np.pi, 10)
+    
+    y = []
 
-    p0 = np.array([E, 0, 0, p])
-    p1 = np.array([E, 0, 0, -p])
-    p2 = np.array([E, p*np.sin(theta), 0, p*np.cos(theta)])
-    p3 = np.array([E, -p*np.sin(theta), 0, -p*np.cos(theta)])
-    p_list = [p0, p1, p2, p3]
-    print(p_list)
+    for theta in theta_list:
+        p0 = np.array([E, 0, 0, p])
+        p1 = -np.array([E, 0, 0, -p])
+        p2 = np.array([E, p*np.sin(theta), 0, p*np.cos(theta)])
+        p3 = np.array([E, -p*np.sin(theta), 0, -p*np.cos(theta)])
+        #p4 = np.array([E, 0, p, 0])
+        p_list = [p0, p1, p2, p3]
+        print(p_list)
 
 
 
-    #Run functions
-    calculate_combined_current(p_list[1:])
-    calculate_matrix_element(p_list)
+        #Run functions
+        calculate_combined_current(p_list[1:])
+        y.append(calculate_matrix_element(p_list))
+    plt.plot(np.cos(theta_list), y)
+    plt.xlabel("cos(theta)")
+    plt.ylabel("|M|^2")
+    plt.title("Matrix Element Squared vs cos(theta)")
+    plt.figtext(0.5, 0, f"Energy = {E}, Momentum = {p}, Mass = {m}", ha="center", fontsize=10)
+    plt.show()
