@@ -1,6 +1,14 @@
 #Files to ignore
 testing.ipynb
-venv/
+archive.ipynb
+graphs.py
+
+
+myenv/
+__pycache__/
+
+
+venv_setup
 
 #File-types to ignore
 *.png
