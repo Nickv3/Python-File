@@ -3,8 +3,9 @@ import math
 import scipy.special as sp
 from scipy.optimize import brentq
 from currents import calculate_matrix_element
+import observables as obs
 
-def mc_cross_section(com_energy, no_events, no_particles, masses):
+def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, obs_fun:function):
     """
     Estimate the cross-section in scattering of N_particles massless particles using Monte Carlo integration and rambo phase space generator.
 
@@ -12,25 +13,40 @@ def mc_cross_section(com_energy, no_events, no_particles, masses):
     com_energy (float): COM energy.
     no_events (int): Number of Monte Carlo events to generate.
     no_particles (int): Number of particles involved in scattering.
+    masses (np.nd.array): 1D array of masses of n particles.
+    obs_fun (function): Function of observable to measure/plot.
 
     Returns:
     cross_section (float): Estimated cross-section.
     """
     total_weighted_me_sq = 0 # Running total of w_i * |M(p_i)|^2
 
+    # weight_0 = V
     weight_0 = ((np.pi / 2) ** (no_particles - 1)) * ((com_energy ** (2 * no_particles - 4)) / sp.gamma(no_particles) / sp.gamma(no_particles - 1))
+    
+    # Calculate weighted sum of matrix element squared * observable value
     for i in range(no_events):
         phase_space, weight_m = generate_phase_space(com_energy, no_particles, masses)
         me_sq = calculate_matrix_element(phase_space)
-        weight = weight_m * weight_0
-        print(f"Event {i+1}/{no_events}: |M|^2 = {me_sq}, weight = {weight}")
-        total_weighted_me_sq += me_sq * weight
+        obs_val = obs_fun(phase_space)
+        print(f"Event {i+1}/{no_events}: |M|^2 = {me_sq}, weight = {weight_m}, observable = {obs_val}")
+        total_weighted_me_sq += me_sq * weight_m * obs_val
 
-    # Average over events and multiply by flux factor
-    flux = 2 * (com_energy ** 2)
-    cross_section = total_weighted_me_sq / no_events / flux
+    # Multiply summation by prefactor V/(F*N) to get <O>
+    # V = weight_0
+    weight_0 = ((np.pi / 2) ** (no_particles - 1)) * ((com_energy ** (2 * no_particles - 4)) / sp.gamma(no_particles) / sp.gamma(no_particles - 1))
+    # F for massive and massless case
+    if masses is not None:
+        a = com_energy ** 2
+        b = masses[0] ** 2
+        c = masses[1] ** 2
+        flux = 2 * np.sqrt(a**2 + b**2 + c**2 - 2*a*b - 2*b*c - 2*a*c)
+    else:
+        flux = 2 * com_energy ** 2
+    #<O> = V/(F*N) * sum(w_m * |M|**2 * O(phi))
+    observable_mean = total_weighted_me_sq * weight_0 / no_events / flux
 
-    return cross_section
+    return observable_mean
 
 
 def generate_phase_space(w, n, masses):
@@ -51,14 +67,11 @@ def generate_phase_space(w, n, masses):
     #Calculate weight for this phase space point
     if masses is not None:
         if len(masses) == n:
-            print("Massive case")
             p_list, weight = massive_transform(w, n, p_list, masses)
         else:
-            weight = 1
             raise IndexError("Incorrect # of masses")
     else:
         weight = 1
-        print("Massless case")
     return p_list, weight
 
 def massless_momenta_generation(w, n):
@@ -186,4 +199,4 @@ def solve_for_xi(w, p, m):
 
 
 if __name__ == "__main__":
-    print(mc_cross_section(100000,100,6, masses = np.array([1,2,3,4,5,6])))
+    print(mc_cross_section(100000,100,2, masses = None))
