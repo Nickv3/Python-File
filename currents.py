@@ -1,6 +1,6 @@
 from itertools import combinations      # For generating index combinations for particle currents
 
-def calculate_matrix_element(external_points, masses):
+def calculate_matrix_element(external_points, m_prop = 0.1, lambda_0 = 0.01):
     """
     Compute the final matrix element |M|^2 for a set of external points.
 
@@ -14,13 +14,13 @@ def calculate_matrix_element(external_points, masses):
     if len(external_points) < 2:
         return 0  # No interaction with fewer than 2 particles
 
-    combined_current = calculate_combined_current(tuple(external_points[1:]), masses)
+    combined_current = calculate_combined_current(tuple(external_points[1:]), m_prop, lambda_0)
     matrix_element_squared = abs(combined_current)**2
     return matrix_element_squared
 
 
 
-def calculate_combined_current(external_points, masses, lambda_0 = 0.01):
+def calculate_combined_current(external_points, m_prop, lambda_0):
     """
     Calculate the combined currents for a set of external points.
     J_{12...n} = sum over all combinations of sub-currents with propagators and coupling constants.
@@ -53,10 +53,7 @@ def calculate_combined_current(external_points, masses, lambda_0 = 0.01):
             for (pi_1, pi_2) in pi_splits:                                               # Iterate over all current combinations
                 current_sum += J_values[f"J_{len(pi_1)}"][pi_1]*J_values[f"J_{len(pi_2)}"][pi_2]    # Sum the product of the two sub-currents
             if no_points < n:
-                if masses is not None: 
-                    masses_subset = masses[list(current_indices)]
-                    m_sq = sum(masses_subset)**2
-                J_no_points[current_indices] = calculate_propagator(points_subset, masses_subset) * (1j * lambda_0) * current_sum           # Calculate the n-particle current value
+                J_no_points[current_indices] = calculate_propagator(points_subset, m_prop) * (1j * lambda_0) * current_sum           # Calculate the n-particle current value
             else:
                 J_no_points[current_indices] = (1j * lambda_0) * current_sum
         J_values[f"J_{no_points}"] = J_no_points
@@ -107,38 +104,37 @@ def index_subsets(pi:tuple, n:int):
 
 
 
-def calculate_propagator(combined_external_points, m_sq):
+def calculate_propagator(combined_external_points, m_prop):
     """
-    Calculate the propagator factor for a set of combined external points. Typically using massless particles, m=0.
+    Calculate the propagator factor for a set of combined external points.
     
     Parameters:
     combined_external_points: tuple of lists/arrays ([E, px, py, pz], ...)
-    m_sq (float): squared sum of individual particle masses.
+    m_prop (float): intermediate propagator mass.
 
     Returns:
     Complex propagator factor
     """
     E, px, py, pz = sum(combined_external_points)
-    p_squared = E*E - (px*px + py*py + pz*pz)
-    return 1j / (p_squared - m_sq**2 + 1j*1e-10)
+    p_sq = E*E - (px*px + py*py + pz*pz)
+    return 1j / (p_sq - m_prop**2)# + 1j*1e-10)
 
 
 
 if __name__ == '__main__' and True:
     import numpy as np
-
+    seed = 42
     #Define phase space points
     E = 100
-    p = 4
-    m = 0
+    p = 10
     theta_list = [np.pi/4] #np.linspace(0, np.pi, 100)
     for theta in theta_list:
         p0 = np.array([E, 0, 0, p])
         p1 = -np.array([E, 0, 0, -p])
         p2 = np.array([E, p*np.sin(theta), 0, p*np.cos(theta)])
         p3 = np.array([E, -p*np.sin(theta), 0, -p*np.cos(theta)])
-        p4 = np.array([E, 0, p, 0])
-        p_list = [p0, p1, p2, p3, p4]
+        #p4 = np.array([E, 0, p, 0])
+        p_list = [p0, p1, p2, p3]
         #print(p_list)
 
         #Run functions

@@ -3,12 +3,15 @@ Each observable has the same input of the generated 2D phase space array, and ou
 
 Done:
 - cross_section
-- scattering_angle (check and change)
+- scattering_angle (called cos_theta here)
+
+To test:
 - max_particle_energy
 - invariant_mass (verify equation)
-
-To Do:
 - azimuthal_angle
+
+To Add:
+???
 """
 
 
@@ -16,13 +19,12 @@ To Do:
 def cross_section(p_list):
     return 1
 
-# For the angle p1 is from the z-axis O(phi) = theta_p1
-def scattering_angle(p_list):
-    p_1v = p_list[1,1:]
-    e_z = np.array([0,0,1])
-    print(np.linalg.norm(p_1v))
-    theta_p1 = np.arccos(np.dot(p_1v, e_z) / np.linalg.norm(p_1v))
-    return theta_p1
+# For the angle p3 is from the z-axis/p1 O(phi) = theta_p1
+def cos_theta(p_list):
+    p3 = p_list[2]               # outgoing particle
+    p3_vec = p3[1:]
+    z_hat = np.array([0,0,1])   # z unit vector = unit vector of p1
+    return np.dot(p3_vec, z_hat) / np.linalg.norm(p3_vec)
 
 
 # For the angle p1 is from the z-axis O(phi) = phi_p1
@@ -59,7 +61,7 @@ class observables:
     pass
 
 import numpy as np
-#print(scattering_angle(np.array([[1,2,3,4],[5,6,7,8]])))
+print(cos_theta(np.array([[10,0,0,1],[1,2,3,4],[5,6,7,8]])))
 #print(azimuthal_angle(np.array([[1,2,3,4],[5,6,7,8]])))
 #print(max_particle_energy(np.array([[10,2,3,4],[5,6,7,8],[10.1,0,2,3]])))
 #print(total_invariant_mass(np.array([[100,1,2,3],[50,4,5,6],[100,1,5,7]])))

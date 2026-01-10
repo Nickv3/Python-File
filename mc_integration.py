@@ -5,7 +5,60 @@ from scipy.optimize import brentq
 from currents import calculate_matrix_element
 import observables as obs
 
-def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, obs_fun:function):
+def incoming_momenta(com_energy, masses_in):
+    """
+    Adds incoming momenta in the partonic CM frame to the generated final momenta, for 2->n scattering.
+
+    Parameters:
+    com_energy (float): COM energy.
+    masses (np.nd.array): 1D array of masses of n particles.
+
+    Returns:
+    p1, p2 (np.ndarrays): incoming momenta defined by CM energy and 2 particles masses.
+    """
+    s = com_energy**2
+
+    if masses_in is None:
+        #  Massless case
+        E1 = E2 = com_energy / 2
+        p = E1
+    else:
+        # Massive case
+        m1, m2 = masses_in[0], masses_in[1]
+        p = np.sqrt((s - (m1 + m2)**2) * (s - (m1 - m2)**2)) / (2 * com_energy)
+        E1 = (s + m1**2 - m2**2) / (2 * com_energy)
+        E2 = (s + m2**2 - m1**2) / (2 * com_energy)
+
+    p1 = np.array([E1, 0.0, 0.0, +p])
+    p2 = np.array([E2, 0.0, 0.0, -p])
+    return p1, p2
+
+
+def flux_factor(com_energy, masses_in):
+    """
+    Calculate the flux factor for 2->n scattering. for massive and massless case.
+    """
+    s = com_energy**2
+    if masses_in is None:
+        return 2 * s
+    m1, m2 = masses_in[0], masses_in[1]
+    return 2 * np.sqrt((s - (m1+m2)**2)*(s - (m1-m2)**2))
+
+def separate_in_and_out(no_particles, masses):
+    """
+    Separate incoming and outgoing particle masses and numbers.
+    """
+    no_outgoing = no_particles - 2
+    if masses is not None:
+        masses_in = masses[0:2]
+        masses_out = masses[2:]
+        assert len(masses_out) == no_outgoing, "Incorrect no of masses for outgoing particles"
+    else:
+        masses_in = None
+        masses_out = None
+    return masses_in, masses_out, no_outgoing
+
+def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, obs_fun):
     """
     Estimate the cross-section in scattering of N_particles massless particles using Monte Carlo integration and rambo phase space generator.
 
@@ -20,59 +73,63 @@ def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, 
     cross_section (float): Estimated cross-section.
     """
     total_weighted_me_sq = 0 # Running total of w_i * |M(p_i)|^2
-
-    # weight_0 = V
-    weight_0 = ((np.pi / 2) ** (no_particles - 1)) * ((com_energy ** (2 * no_particles - 4)) / sp.gamma(no_particles) / sp.gamma(no_particles - 1))
     
+    # Separate incoming and outgoing particle masses and numbers
+    masses_in, masses_out, no_outgoing = separate_in_and_out(no_particles, masses)
+
     # Calculate weighted sum of matrix element squared * observable value
     for i in range(no_events):
-        phase_space, weight_m = generate_phase_space(com_energy, no_particles, masses)
-        me_sq = calculate_matrix_element(phase_space)
-        obs_val = obs_fun(phase_space)
-        print(f"Event {i+1}/{no_events}: |M|^2 = {me_sq}, weight = {weight_m}, observable = {obs_val}")
+        # incoming momenta (2 particles)
+        p_in = incoming_momenta(com_energy, masses_in)
+
+        # outgoing momenta (n particles), i.e. the phase space points
+        p_out, weight_m = generate_phase_space(com_energy, no_outgoing, masses_out)
+
+        # full event momenta: [p1, p2, p3, ..., p_{n+2}]
+        p_event = np.vstack((*p_in, p_out))
+        #if i < 10:
+        #    print(p_event)
+
+        me_sq = calculate_matrix_element(p_event)
+        obs_val = obs_fun(p_event)
+        #print(f"Event {i+1}/{no_events}: |M|^2 = {me_sq}, weight = {weight_m}, observable = {obs_val}")
+
         total_weighted_me_sq += me_sq * weight_m * obs_val
 
     # Multiply summation by prefactor V/(F*N) to get <O>
     # V = weight_0
-    weight_0 = ((np.pi / 2) ** (no_particles - 1)) * ((com_energy ** (2 * no_particles - 4)) / sp.gamma(no_particles) / sp.gamma(no_particles - 1))
-    # F for massive and massless case
-    if masses is not None:
-        a = com_energy ** 2
-        b = masses[0] ** 2
-        c = masses[1] ** 2
-        flux = 2 * np.sqrt(a**2 + b**2 + c**2 - 2*a*b - 2*b*c - 2*a*c)
-    else:
-        flux = 2 * com_energy ** 2
+    weight_0 = ((np.pi / 2) ** (no_outgoing - 1)) * (com_energy ** (2 * no_outgoing - 4)) / (sp.gamma(no_outgoing) * sp.gamma(no_outgoing - 1))
+
     #<O> = V/(F*N) * sum(w_m * |M|**2 * O(phi))
-    observable_mean = total_weighted_me_sq * weight_0 / no_events / flux
+    flux = flux_factor(com_energy, masses_in)
+    observable_mean = total_weighted_me_sq * weight_0 / (no_events * flux)
 
     return observable_mean
 
 
 def generate_phase_space(w, n, masses):
     """
-    Uses rambo algorithm to generate n-particle phase space for massless particles.
+    Uses rambo algorithm to generate n-particle phase space for outgoingparticles.
     When masses provided, transforms momenta to massive particles and provide weights.
 
     Parameters:
     w (float): COM energy.
-    n (int): Number of particles involved in scattering.
-    masses (np.ndarray): 1D array of particle weights. If None, massless particles calculated.
+    n (int): Number of outgoing scattered particles.
+    masses (np.ndarray): 1D array of outgoing particle weights. If None, massless particles calculated.
 
     Returns:
-    p_list (np.ndarray): Generated 4-momenta of n particles for event. 2D array of shape (n, 4).
+    p_list (np.ndarray): Generated 4-momenta of n outgoing particles for event. 2D array of shape (n, 4).
     weight (float): Weight value for event.
     """
     p_list = massless_momenta_generation(w, n)
     #Calculate weight for this phase space point
     if masses is not None:
-        if len(masses) == n:
-            p_list, weight = massive_transform(w, n, p_list, masses)
-        else:
-            raise IndexError("Incorrect # of masses")
+        assert len(masses) == n, "Incorrect no of masses for outgoing particles"
+        p_list, weight = massive_transform(w, n, p_list, masses)
     else:
         weight = 1
     return p_list, weight
+
 
 def massless_momenta_generation(w, n):
     """
@@ -81,7 +138,7 @@ def massless_momenta_generation(w, n):
 
     Parameters:
     w (float): COM energy.
-    n (int): Number of particles involved in scattering.
+    n (int): Number of outgoing scattered particles.
 
     Returns:
     p_list (np.ndarray): Generated 4-momenta of n massless particles. 2D array of shape (n_particles, 4).
@@ -123,12 +180,12 @@ def massive_transform(w, n, p_list, masses):
 
     Parameters:
     w (float): COM energy.
-    n (int): Number of particles involved in scattering.
-    p_list (np.ndarray): 2D array of generated momenta.
-    masses (np.ndarray): 1D array of particle weights. If None, massless particles calculated.
+    n (int): Number of outgoing scattered particles.
+    p_list (np.ndarray): 2D array of generated outgoing momenta for massless particles.
+    masses (np.ndarray): 1D array of outgoing particle weights. If None, massless particles calculated.
 
     Returns:
-    k_list (np.ndarray): Generated 4-momenta of n massive particles for event. 2D array of shape (n, 4).
+    k_list (np.ndarray): Generated 4-momenta of n outgoing massive particles for event. 2D array of shape (n, 4).
     weight (float): Weight value for event.
     """
     # Solve w = Σ sqrt(m_i^2 + ξ^2 p_i^2) for ξ ≥ 0 numerically
@@ -199,4 +256,5 @@ def solve_for_xi(w, p, m):
 
 
 if __name__ == "__main__":
-    print(mc_cross_section(100000,100,2, masses = None))
+    m_prop = 1
+    print(mc_cross_section(1000, 100000, 4, None, obs.cross_section))
