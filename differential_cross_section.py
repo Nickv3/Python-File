@@ -76,9 +76,9 @@ def differential_cross_section(com_energy:float, no_events:int, no_particles:int
     # Plot errorbars on histogram
     plt.errorbar(bin_centers, values_sum, yerr=yerrors, fmt='none', ecolor='black', capsize=2, label='MC error')
 
-    plt.xlabel("cosθ from angle between p1 and z-axis/p3")
-    plt.ylabel("dσ/dcosθ")
-    plt.title("Differential Cross Section dσ/dcosθ in 2 -> 2 Scattering")
+    plt.xlabel("cosθ")
+    plt.ylabel("dσ/d(cosθ)")
+    
     plt.xlim([-1, 1])
     #plt.yscale("log")
     print(len(obs_values), no_events)
@@ -86,5 +86,8 @@ def differential_cross_section(com_energy:float, no_events:int, no_particles:int
 
 
 
-print(differential_cross_section(1000, 10000, 4, masses = None, obs_fun = obs.cos_theta)) #np.array([1,2,3,4])
+print(differential_cross_section(1000, 200000, 4, masses = np.array([50,100,50,100]), obs_fun = obs.cos_theta)) #np.array([1,2,3,4])
 plt.show()
+
+
+#caption("Differential Cross Section dσ/dcosθ in 2 -> 2 Scattering"), n = 4, masses = None, "cosθ from angle between p1 and z-axis/p3"
