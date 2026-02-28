@@ -1,14 +1,15 @@
-#Files to ignore
-testing.ipynb
+# Files to ignore
+experimental_code.ipynb
 archive.ipynb
 graphs.py
+testing_yukawa.ipynb
 
-
+# Folders to ignore
 myenv/
 __pycache__/
 
-
+# Other
 venv_setup
 
-#File-types to ignore
+# File-types to ignore
 *.png

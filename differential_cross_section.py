@@ -86,7 +86,7 @@ def differential_cross_section(com_energy:float, no_events:int, no_particles:int
 
 
 
-print(differential_cross_section(1000, 200000, 4, masses = np.array([50,100,50,100]), obs_fun = obs.cos_theta)) #np.array([1,2,3,4])
+print(differential_cross_section(1000, 200000, 4, masses = np.array([100, 100, 100, 100]), obs_fun = obs.cos_theta)) #np.array([100, 100, 100, 100])
 plt.show()
 
 
