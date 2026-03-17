@@ -1,6 +1,6 @@
 from itertools import combinations      # For generating index combinations for particle currents
 
-def calculate_matrix_element(external_points, m_prop = 0.1, lambda_0 = 0.01):
+def calculate_matrix_element(external_points, m_prop, lambda_0):
     """
     Compute the final matrix element |M|^2 for a set of external points.
 
@@ -122,11 +122,12 @@ def calculate_propagator(combined_external_points, m_prop):
 
 
 if __name__ == '__main__' and True:
-    import numpy as np
-    seed = 42
+    import numpy as np    
     #Define phase space points
-    E = 100
-    p = 10
+    E = 1000
+    m_phi = 10
+    lambda_0 = 1
+    p = np.sqrt(E**2 - m_phi**2) if E > m_phi else 0
     theta_list = [np.pi/4] #np.linspace(0, np.pi, 100)
     for theta in theta_list:
         p0 = np.array([E, 0, 0, p])
@@ -138,4 +139,4 @@ if __name__ == '__main__' and True:
         #print(p_list)
 
         #Run functions
-        print(calculate_matrix_element(p_list))
+        print(calculate_matrix_element(p_list, m_phi, lambda_0))

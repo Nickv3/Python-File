@@ -1,42 +1,40 @@
-from itertools import combinations      # For generating index combinations for particle currents
 import numpy as np
+from itertools import combinations, product
+from enum import Enum, auto
 
 
-# Gamma matrices, used in slash operator and Dirac propagator
+
 def gamma_matrices():
     """
-    Return:
+    Calculates the gamma matrices in the Dirac representation, used in slash operator and Dirac propagator.
+
+    Returns:
     g{0,1,2,3} (np.ndarray): gamma^mu matrices in the Dirac representation.
     """
-    g0 = np.array([
-        [ 1,  0,  0,  0],
-        [ 0,  1,  0,  0],
-        [ 0,  0, -1,  0],
-        [ 0,  0,  0, -1]], dtype=complex)
+    g0 = np.array([[ 1, 0, 0, 0],
+                   [ 0, 1, 0, 0],
+                   [ 0, 0,-1, 0],
+                   [ 0, 0, 0,-1]], dtype=complex)
 
-    g1 = np.array([
-        [ 0,  0,  0,  1],
-        [ 0,  0,  1,  0],
-        [ 0, -1,  0,  0],
-        [-1,  0,  0,  0]], dtype=complex)
+    g1 = np.array([[ 0, 0, 0, 1],
+                   [ 0, 0, 1, 0],
+                   [ 0,-1, 0, 0],
+                   [-1, 0, 0, 0]], dtype=complex)
 
-    g2 = np.array([
-        [ 0,  0,  0, -1j],
-        [ 0,  0,  1j,  0],
-        [ 0,  1j,  0,  0],
-        [-1j,  0,  0,  0]], dtype=complex)
+    g2 = np.array([[ 0, 0, 0,-1j],
+                   [ 0, 0, 1j, 0],
+                   [ 0, 1j, 0, 0],
+                   [-1j, 0, 0, 0]], dtype=complex)
 
-    g3 = np.array([
-        [ 0,  0,  1,  0],
-        [ 0,  0,  0, -1],
-        [-1,  0,  0,  0],
-        [ 0,  1,  0,  0]], dtype=complex)
+    g3 = np.array([[ 0, 0, 1, 0],
+                   [ 0, 0, 0,-1],
+                   [-1, 0, 0, 0],
+                   [ 0, 1, 0, 0]], dtype=complex)
 
     return g0, g1, g2, g3
 
 gamma0, gamma1, gamma2, gamma3 = gamma_matrices()
-print(type(gamma0), gamma0.shape)
-# Slash operator for p-slash in Dirac propagator
+
 def slash(p):
     """
     Computes p-slash = gamma^mu p_mu.
@@ -51,165 +49,421 @@ def slash(p):
     return (gamma0 * E - gamma1 * px - gamma2 * py - gamma3 * pz)
 
 
-def calculate_matrix_element(external_momenta, masses, m_phi = 0.1, m_psi = 0.1, g = 0.01):
+
+def dirac_spinor_u(p, m_psi, spin):
     """
-    Compute the final matrix element |M|^2 for a set of external points.
+    Calculates the Dirac spinor u(p,s) for an external fermion current in the Dirac basis.
 
     Parameters:
-    external_points: 2D list [[E, px, py, pz], ...]
-    masses (np.nd.array): 1D array of masses of n particles.
+    p (np.ndarray): four-momentum [E, px, py, pz]
+    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    spin (int): spin state (0 or 1)
 
     Returns:
-    float: |M|^2
+    u(p,s) (np.ndarray): external fermion current u in Dirac basis. Output shape (4,1).
     """
-    if len(external_momenta) < 2:
-        return 0  # No interaction with fewer than 2 particles
+    E, px, py, pz = p
+    chi = np.array([[1],[0]]) if spin == 0 else np.array([[0],[1]])
 
-    combined_current = calculate_combined_current(tuple(external_momenta[1:]), masses, m_phi, m_psi, g)
-    matrix_element_squared = abs(combined_current)**2 #change to new form
-    return matrix_element_squared
-
-
-
-def calculate_combined_current(external_momenta, masses, m_phi, m_psi, g):
-    """
-    Calculate the combined currents for a set of external points.
-    J_{12...n} = sum over all combinations of sub-currents with propagators and coupling constants.
-
-    Parameters:
-    external_momenta (np.ndarray): ((E, px, py, pz), ...], with first point removed (may no longer be true)
-    g (float): coupling constant
-    masses (np.nd.array): 1D array of masses of n particles.
-
-    Returns:
-    float: J_{12...n}
-    """
-    n = len(external_momenta)
-    m_sq = 0 # Baseline squared mass set as zero and only changed later if masses given
-
-    J_values = {}
-
-    # Single particle currents
-    J_1 = { (i,): 1 for i in range(n) }
-    J_values["J_1"] = J_1
-
-    # Build higher level particle currents, where 'dim' is the total number of combined external points.
-    for no_points in range(2, n + 1):
-        J_no_points = {}                                  # Initialise dictionary of currents for 'no_points' external points
-        for current_indices in combinations(range(n), no_points):                        # Iterate over all index combinations for n-particle current
-            points_subset = tuple(external_momenta[i] for i in current_indices)               # Get the external momenta for the current index combination
-            pi_splits = index_subsets(current_indices, no_points)                  # Find all possible current combinations that can form the n-particle current
-            
-            current_sum = 0
-            for (pi_1, pi_2) in pi_splits:                                               # Iterate over all current combinations
-                current_sum += J_values[f"J_{len(pi_1)}"][pi_1]*J_values[f"J_{len(pi_2)}"][pi_2]    # Sum the product of the two sub-currents
-            
-            if current_type == 'psi':
-                propagator = calculate_dirac_propagator(points_subset, m_psi)
-            elif current_type == 'phi':
-                propagator = calculate_scalar_propagator(points_subset, m_phi)
-            if no_points < n:
-                propagator = 1
-
-            J_no_points[current_indices] = propagator * (1j * g) * current_sum           # Calculate the n-particle current value
-
-        J_values[f"J_{no_points}"] = J_no_points
-
-    return J_values[f"J_{n}"][tuple(range(n))]
-
-
-
-def index_subsets(pi:tuple, n:int):
-    """
-    Calculate all unique ways to split a set of indices into two non-empty subsets.
+    sigma_dot_p = np.array([
+        [pz, px - 1j*py],
+        [px + 1j*py, -pz]])
     
-    Parameters:
-    pi (tuple): Tuple of indices to split
-    n (int): Number of indices in pi
+    eta = np.sqrt(E + m_psi) #abs as crossing can lead to negative energy in 4-momentum when we want positive for spinor construction
+    upper = eta * chi
+    lower = (sigma_dot_p @ chi) / eta
+
+    return np.vstack([upper, lower])
+
+def dirac_spinor_v(p, m_psi, spin):
+    """
+    Calculates the Dirac spinor v(p,s) for an outgoing antifermion in the Dirac basis. Later conjugate and transpose to get vbar = v†γ^0 for the external antifermion current.
+
+    Params:
+    p (np.ndarray): four-momentum [E, px, py, pz]
+    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    spin (int): spin state (0 or 1)
 
     Returns:
-    List of tuples of tuple pairs for pi_1 & pi_2
+    v(p,s) (np.ndarray): outgoing antifermion current v in Dirac basis. Output shape (4,1)
     """
-    pi_pairs = []
+    E, px, py, pz = p
+    chi = np.array([[1],[0]]) if spin == 0 else np.array([[0],[1]])
+
+    sigma_dot_p = np.array([
+        [pz, px - 1j*py],
+        [px + 1j*py, -pz]])
+
+    eta = np.sqrt(E + m_psi) #abs as crossing can lead to negative energy in 4-momentum when we want positive for spinor construction
+    upper = (sigma_dot_p @ chi) / eta
+    lower = eta * chi
+
+    return np.vstack([upper, lower])
+
+
+# FieldType class assigns names to indices of different fields.
+class FieldType(Enum):
+    PHI = auto()    # φ
+    PSI = auto()    # ψ
+    PSIBAR = auto() # ψ̄ 
+
+class Current:
+    def __init__(self, field_type, current, momentum):
+        """
+        Created a current object for each external particle/combined current, and assign parameters as its values.
+
+        Parameters:
+        self: current object to be created
+        field_type (FieldType): type of the current (PHI, PSI, PSIBAR)
+        current (np.ndarray or float): the current value (scalar for PHI, 4x1 matrix for PSI/PSIBAR)
+        momentum (np.ndarray): four-momentum [E, px, py, pz]
+
+        Returns:
+        Current object with specified type, current value, and momentum.
+        """
+        self.type = field_type
+        self.current = current          # scalar or (4x1 or 1x4) array depending on field type
+        self.p = np.asarray(momentum, float)
+
+    def propagate(self, m_phi, m_psi, eps = 1e-12):
+        """
+        Creates a new current object by applying the appropriate propagator to the new combined current, based on its field type.
+        Premultiplies line vector for ψ̄ and postmultiply for ψ, and scalar multiplication for φ.
+
+        Parameters:
+        self (Current): current object to be propagated
+        m_phi (float): mass of the scalar field φ
+        m_psi (float): mass of the fermion field ψ/ψ̄ 
+        eps (float): imaginary part added to denominator to avoid limits in propagator, can made smaller if causing issues
+
+        Returns:
+        Modified current object with new current value, but unchanged type and momentum.
+        """
+        p_sq = self.p[0]**2 - np.dot(self.p[1:], self.p[1:])
+
+        # Scalar propagator: D(p) = i / (p^2 - m^2 + iε)
+        if self.type == FieldType.PHI:
+            D_prop = 1j / (p_sq - m_phi**2 + 1j * eps)
+            return Current(self.type, D_prop * self.current, self.p)
+
+        # Dirac/vector/fermion propagator: S(p) = i (p-slash + m) / (p^2 - m^2 + iε)
+        if self.type == FieldType.PSI:
+            S_prop = 1j * (slash(self.p) + m_psi*np.eye(4)) / (p_sq - m_psi**2 + 1j * eps)
+            return Current(self.type, self.current @ S_prop, self.p)
+        if self.type == FieldType.PSIBAR:
+            S_prop = 1j * (slash(self.p) + m_psi*np.eye(4)) / (p_sq - m_psi**2 + 1j * eps)
+            return Current(self.type, S_prop @ self.current, self.p)
+
+        raise ValueError("Unknown field type")
+
+    def combine(self, other, g):
+        """
+        Creates a new current object by combining the current values of self and other, applying Feynman rules for a vertexbased on their field types.
+        Will not combine if the vertex is not valid for the Yukawa interaction (i.e. 2 of same type or non-existent type), and will raise an error instead.
+
+        Parameters:
+        self (Current): current object to be propagated
+        other (Current): current object to be combined with self
+        g (float): coupling constant for Yukawa interaction
+
+        Returns:
+        Combined current object with new type, current value and momentum.
+        """
+        p_new = self.p + other.p
+
+        # ψ + ψ̄ → φ
+        if self.type == FieldType.PSI and other.type == FieldType.PSIBAR:
+            vertex = 1j * g * (self.current @ other.current)[0,0] # [0,0] extracts float from 1x1 array
+            return Current(FieldType.PHI, vertex, p_new)
+        if self.type == FieldType.PSIBAR and other.type == FieldType.PSI:
+            vertex = 1j * g * (other.current @ self.current)[0,0]
+            return Current(FieldType.PHI, vertex, p_new)
+
+        # ψ + φ → ψ
+        if self.type == FieldType.PSI and other.type == FieldType.PHI:
+            return Current(FieldType.PSI, 1j * g * self.current * other.current, p_new)
+        if self.type == FieldType.PHI and other.type == FieldType.PSI:
+            return Current(FieldType.PSI, 1j * g * other.current * self.current, p_new)
+
+        # ψ̄ + φ → ψ̄
+        if self.type == FieldType.PSIBAR and other.type == FieldType.PHI:
+            return Current(FieldType.PSIBAR, 1j * g * self.current * other.current, p_new)
+        if self.type == FieldType.PHI and other.type == FieldType.PSIBAR:
+            return Current(FieldType.PSIBAR, 1j * g * other.current * self.current, p_new)
+
+
+        raise ValueError(f"Invalid Yukawa vertex: {self.type} + {other.type}")
+
+
+
+# External currents, classified by field type and contains the spinor current (or 1 for scalars) and momentum information for the external particles.
+def external_current(field_type, p, m_psi, incoming, crossed, spin=None):
+    """
+    Creates a current object for an external particle based on its field type, momentum, and spinor current (for fermions).
+
+    Parameters:
+    field_type (FieldType): type of the current (PHI, PSI, PSIBAR)
+    p (np.ndarray): four-momentum [E, px, py, pz]
+    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    incoming (bool): whether the particle is incoming or outgoing, to determine which u/v spinor to construct
+    spin (int): spin state (0 or 1)
+
+    Returns:
+    Combined current object with new type, current value and momentum.
+    """
+    #print(f"field_type={field_type}, spin={spin}, incoming={incoming}")
+    #print(crossed)
+    if crossed == True: # Ensure crossed particles are calculated correctly, using original momentum but new type.
+        p_spinor = -p
+    else:
+        p_spinor = p
+
+    if field_type == FieldType.PHI:
+        return Current(FieldType.PHI, 1.0 + 0j, p)
+
+    if field_type == FieldType.PSI:
+        u = dirac_spinor_u(p_spinor, m_psi, spin)
+        if incoming == False:
+            u = u.conj().T @ gamma0 # ubar = u†γ^0 is the external current for outgoing fermions (shape 1x4/row vector)
+        return Current(FieldType.PSI, u, p)
+
+    if field_type == FieldType.PSIBAR:
+        v = dirac_spinor_v(p_spinor, m_psi, spin)
+        if incoming == True:
+            v = v.conj().T @ gamma0 # vbar = v†γ^0 is the external current for incoming antifermions (shape 1x4/row vector)
+        return Current(FieldType.PSIBAR, v, p)
+
+    raise ValueError("Unknown field type")
+
+
+
+def index_subsets(indices):
+    """
+    Splits set of indices to be combined into all unique pairs of non-empty subsets (a,b).
+
+    Parameters:
+    indices (tuple of ints): tuple of indices to be split into subsets
+
+    Returns:
+    subsets (list of tuples): list of unique subsets represented as a tuple of two tuples (a,b).
+    """
+    n = len(indices)
+    subsets = []
     seen = set()
-    pi_list = list(pi)
 
-    def canonical(a, b):
-        # Size ordering
-        if len(a) < len(b):
-            return (a, b)
-        elif len(a) > len(b):
-            return (b, a)
-        # Equal size -> number ordering
-        return (a, b) if a <= b else (b, a)
-    
-    #Subset sizes only up to n//2 avoids duplicates
-    for r in range(1, n // 2 + 1):
-        for combo in combinations(pi_list, r):
-            left = tuple(combo)
-            right = tuple(x for x in pi_list if x not in combo)
-            
-            #Sort pi_1 and pi_2 so A|B == B|A
-            pair = canonical(left, right)
-
-            # Must deduplicate using a hashable key
-            if pair not in seen:
-                seen.add(pair)
-                pi_pairs.append(pair)
-
-    return pi_pairs
+    for a_size in range(1, n // 2 + 1):
+        for combo in combinations(indices, a_size):
+            a = tuple(combo)
+            b = tuple(i for i in indices if i not in combo)
+            new = tuple(sorted((a, b)))
+            if new not in seen:
+                seen.add(new)
+                subsets.append((a, b))
+    return subsets
 
 
 
-def calculate_scalar_propagator(combined_external_points, m_phi):
+def calculate_amplitude(external_currents, m_phi, m_psi, g):
     """
-    Calculate the scalar propagator factor for a combined fermion and anti-fermion.
-    
+    Calculates the matrix element M for a given set of external particles with given spin state using B-G recursion.
+
     Parameters:
-    combined_external_points (tuple of arrays) ([E, px, py, pz], ...)
-    m_phi (float): intermediate scalar propagator mass.
+    external_currents (list of Current objects): list of external currents for each particle
+    m_phi (float): mass of the scalar field φ
+    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    g (float): coupling constant for Yukawa interaction
 
     Returns:
-    Complex propagator factor
+    M (float): complex M for the given external particles and spin states
     """
-    E, px, py, pz = sum(combined_external_points)
-    p_sq = E*E - (px*px + py*py + pz*pz)
-    return 1j / (p_sq - m_phi**2)
+    n = len(external_currents) - 1
+    single_current = external_currents[0]
+    other_currents = external_currents[1:]
+    J = {}
 
-def calculate_dirac_propagator(combined_external_points, m_psi):
+    # Single-particle currents
+    for i, pt in enumerate(other_currents):
+        J[(i,)] = pt
+
+    debug_contributions = {}
+
+    # Build multi-particle currents
+    for no_pt in range(2, n + 1): # no_pt is the number of particles in the current being constructed, starting from 2 up to n
+        for inds in combinations(range(n), no_pt): # indices of the external particles included in the current being constructed
+            total = None
+
+            for a, b in index_subsets(inds):
+                if a not in J or b not in J:
+                    #print("fail1")
+                    continue
+
+                Ja = J[a]
+                Jb = J[b]
+
+                try:
+                    C = Ja.combine(Jb, g)
+
+                    key_d = inds
+                    if key_d not in debug_contributions:
+                        debug_contributions[key_d] = []
+                    debug_contributions[key_d].append(C.current.copy())
+
+                    # propagate only if not final off-shell current
+                    if no_pt < n:
+                        C = C.propagate(m_phi, m_psi)
+
+                    #total = C if total is None else Current(C.type, total.current + C.current, C.p) below without error handling
+                    if total is None:
+                        total = C
+                    else:
+                        if total.type != C.type:
+                            raise ValueError("Type mismatch in current summation")
+                        total = Current(C.type, total.current + C.current, C.p)
+
+                except ValueError:
+                    #print(f"fail2 for combination: {Ja.type} + {Jb.type}")
+                    pass
+
+            if total is not None:
+                J[inds] = total
+
+    # Final off-shell current (all outgoing combined)
+    final_current = J[tuple(range(n))]
+    if False: # Debug print all currents
+        print("\n--- Checking for duplicate contributions in final current ---")
+
+        final_key = tuple(range(n))
+
+        if final_key in debug_contributions:
+            contribs = debug_contributions[final_key]
+            for i in range(len(contribs)):
+                for j in range(i+1, len(contribs)):
+                    if np.allclose(contribs[i], contribs[j]):
+                        print(f"Duplicate contribution found: {i} and {j}")
+                        pass
+
+
+        for j in J:
+            print(f"J{j} = {J[j].current}")
+
+    #set up to contract n+1 particle off shell current with single particle current to get M
+    if single_current.type == FieldType.PSI and final_current.type == FieldType.PSI: # single incoming u and final outgoing ubar
+        M = (final_current.current @ single_current.current)[0,0]
+
+    elif single_current.type == FieldType.PSIBAR and final_current.type == FieldType.PSIBAR: # single incoming vbar and final outgoing v
+        M = (single_current.current @ final_current.current)[0,0]
+
+    elif single_current.type == FieldType.PHI and final_current.type == FieldType.PHI: #incoming scalar and outgoing scalar
+        M = single_current.current * final_current.current
+
+    else:
+        raise ValueError(f"Invalid final contraction structure {single_current.type} with {final_current.type}")
+    #print(f"M = {M}")
+    return M
+
+def spin_averaged_matrix_element(external_points, m_phi, m_psi, g):
     """
-    Calculate the (anti-)fermion propagator factor for a combined scalar and (anti-)fermion.
-    
+    Calculates the squared and spin-summed matrix element |M|^2 for a given set of external particles using B-G recursion.
+
+    Changes to be made:
+    Currently assumes all particles are outgoing, and the first two particles in the external_points list are the initial state particles (the 2nd of which will be conjugated for the current construction).
+    Currently assumes only 2 spin states (0/up and 1/down).
+    Currently assumes all particles are distinguishable, so no symmetry factors are included.
+    Currently assumes overall spin and fermion (baryon/lepton?) number conservation.
+
     Parameters:
-    combined_external_points: tuple of lists/arrays ([E, px, py, pz], ...)
-    m_psi (float): intermediate dirac propagator mass.
+    external_points (list of dict): list of external particles with their type and momentum, e.g. [{"type": FieldType.PSI, "p": p0}, ...]
+    m_phi (float): mass of the scalar field φ
+    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    g (float): coupling constant for Yukawa interaction
 
     Returns:
-    Vector propagator factor
+    M_sq_av (float): squared and spin-summed matrix element |M|^2 for the given external particles
     """
-    E, px, py, pz = sum(combined_external_points)
-    p_sq = E*E - (px*px + py*py + pz*pz)
+    # Determines the number of initial (anti-)fermions based on the external_points list, and generates all possible spin configurations for them.
+    initial_fermion_indices = [i for i, pt in enumerate(external_points) if (pt["type"] in (FieldType.PSI, FieldType.PSIBAR)) and (pt["incoming"] == True)]
+    #print(len(initial_fermion_indices))
+    spin_configs = list(product([0,1], repeat=len(initial_fermion_indices)))
+    #print(spin_configs)
+
+    crossed_points = []
+    for i, pt in enumerate(external_points):
+        new_pt = pt.copy() # avoid changing original
+        p = new_pt["p"].copy()
+        field_type = new_pt["type"]
+        incoming = new_pt["incoming"]
+
+        if incoming == True and i > 0: # crossing all but first incoming particle to have n+1 outgoing particles
+            # Reverse 4-momentum.
+            p = -p
+            # Change field type (ψ ↔ ψ̄, φ is unchanged)
+            if field_type == FieldType.PSI:
+                field_type = FieldType.PSIBAR
+            elif field_type == FieldType.PSIBAR:
+                field_type = FieldType.PSI
+            incoming = False
+            crossed = True
+            crossed_points.append({"p": p, "type": field_type, "incoming": incoming, "crossed": crossed})
+            continue
+        crossed_points.append({"p": p, "type": field_type, "incoming": incoming, "crossed": False})
+        
+    # Loop over spins of initial (anti-)fermions
+    total_M_sq = 0.0
+    for spins in spin_configs:
+        #print("Running spin config:", spins)
+        spin_dict = dict(zip(initial_fermion_indices, spins))
+
+        external_currents = []
+
+        for i, pt in enumerate(crossed_points):
+            if i in spin_dict:
+                current = external_current(pt["type"], pt["p"], m_psi, pt["incoming"], pt["crossed"], spin=spin_dict[i])
+            else:
+                current = external_current(pt["type"], pt["p"], m_psi, pt["incoming"], pt["crossed"])
+
+            external_currents.append(current)
+        #print(external_currents)
+        M = calculate_amplitude(external_currents, m_phi, m_psi, g)
+
+        total_M_sq += abs(M)**2
+    M_sq_av = total_M_sq / (2 ** len(initial_fermion_indices))
+    return M_sq_av
 
 
+if __name__ == "__main__":
+    E = 1000
+    m_phi = 10
+    m_psi = 10
+    g = 1
+    p = np.sqrt(E**2 - m_psi**2)
 
-    return 1j / (p_sq - m_psi**2)
-
-
-if __name__ == '__main__' and True:
-    import numpy as np
-    seed = 42
-    #Define phase space points
-    E = 100
-    p = 10
-    theta_list = [np.pi/4] #np.linspace(0, np.pi, 100)
-    for theta in theta_list:
-        p0 = np.array([E, 0, 0, p])
-        p1 = -np.array([E, 0, 0, -p])
-        p2 = np.array([E, p*np.sin(theta), 0, p*np.cos(theta)])
+    p0 = np.array([E, 0, 0,  p])
+    p1 = np.array([E, 0, 0, -p])
+    if True:
+        theta = np.pi / 4
+        p2 = np.array([E,  p*np.sin(theta), 0,  p*np.cos(theta)])
         p3 = np.array([E, -p*np.sin(theta), 0, -p*np.cos(theta)])
-        #p4 = np.array([E, 0, p, 0])
-        p_list = [p0, p1, p2, p3]
-        #print(p_list)
+        momenta22 = (p0, p1, p2, p3)
+        external_points22 = [
+            {"type": FieldType.PSI,    "p": p0, "incoming": True},
+            {"type": FieldType.PSIBAR, "p": p1, "incoming": True},
+            {"type": FieldType.PHI,    "p": p2, "incoming": False},
+            {"type": FieldType.PHI,    "p": p3, "incoming": False},
+            ]
+        print(spin_averaged_matrix_element(external_points22, m_phi, m_psi, g))
 
-        #Run functions
-        print(calculate_matrix_element(p_list))
+    if True:
+        E_phi = 2*E/3
+        k = np.sqrt(E_phi**2 - m_phi**2)
+        p2 = np.array([E_phi,  k,                 0, 0])
+        p3 = np.array([E_phi, -k/2,  np.sqrt(3)*k/2, 0])
+        p4 = np.array([E_phi, -k/2, -np.sqrt(3)*k/2, 0])
+        momenta23 = (p0, p1, p2, p3, p4)
+        external_points23 = [
+            {"type": FieldType.PSI,    "p": p0, "incoming": True},
+            {"type": FieldType.PSIBAR, "p": p1, "incoming": True},
+            {"type": FieldType.PHI,    "p": p2, "incoming": False},
+            {"type": FieldType.PHI,    "p": p3, "incoming": False},
+            {"type": FieldType.PHI,    "p": p4, "incoming": False}
+            ]
+        print(spin_averaged_matrix_element(external_points23, m_phi, m_psi, g))

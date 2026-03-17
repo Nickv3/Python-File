@@ -2,7 +2,8 @@ import numpy as np
 import math
 import scipy.special as sp
 from scipy.optimize import brentq
-from currents import calculate_matrix_element
+from currents_phi import calculate_matrix_element
+from currents_yukawa import FieldType, spin_averaged_matrix_element
 import observables as obs
 
 def incoming_momenta(com_energy, masses_in):
@@ -58,7 +59,7 @@ def separate_in_and_out(no_particles, masses):
         masses_out = None
     return masses_in, masses_out, no_outgoing
 
-def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, obs_fun):
+def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, theory, constants, obs_fun):
     """
     Estimate the cross-section in scattering of N_particles massless particles using Monte Carlo integration and rambo phase space generator.
 
@@ -67,6 +68,8 @@ def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, 
     no_events (int): Number of Monte Carlo events to generate.
     no_particles (int): Number of particles involved in scattering.
     masses (np.nd.array): 1D array of masses of n particles.
+    theory (str): "phi" or "yukawa" to specify which theory to use for matrix element calculation.
+    constants (dict): Dictionary of theory constants, m_phi, m_psi, lambda_0, g.
     obs_fun (function): Function of observable to measure/plot.
 
     Returns:
@@ -90,7 +93,16 @@ def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, 
         #if i < 10:
         #    print(p_event)
 
-        me_sq = calculate_matrix_element(p_event)
+        if theory == "phi":
+            me_sq = calculate_matrix_element(p_event, constants['m_phi'], constants['lambda_0'])
+        elif theory == "yukawa":
+            p_event = [{"type": FieldType.PSI,    "p": p_event[0], "incoming": True},
+                       {"type": FieldType.PSIBAR, "p": p_event[1], "incoming": True},
+                        {"type": FieldType.PHI,    "p": p_event[2], "incoming": False},
+                        {"type": FieldType.PHI,    "p": p_event[3], "incoming": False},]
+
+            me_sq = spin_averaged_matrix_element(p_event, constants['m_phi'], constants['m_psi'], constants['g'])
+        
         obs_val = obs_fun(p_event)
         #print(f"Event {i+1}/{no_events}: |M|^2 = {me_sq}, weight = {weight_m}, observable = {obs_val}")
 
@@ -256,5 +268,10 @@ def solve_for_xi(w, p, m):
 
 
 if __name__ == "__main__":
-    m_prop = 1
-    print(mc_cross_section(1000, 100000, 4, None, obs.cross_section))
+    m_phi = 10
+    m_psi = 10
+    g = 1
+    lambda_0 = 1
+    constants = {'m_phi': m_phi, 'm_psi': m_psi, 'lambda_0': lambda_0, 'g': g}
+    print(mc_cross_section(1000, 100000, 4, None, "phi", constants, obs.cross_section))
+    print(mc_cross_section(1000, 100000, 4, np.array([m_psi, m_psi, m_phi, m_phi]), "yukawa", constants, obs.cross_section))

@@ -5,7 +5,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.special as sp
 
-def differential_cross_section(com_energy:float, no_events:int, no_particles:int, masses, obs_fun):
+from currents_phi import calculate_matrix_element
+from currents_yukawa import FieldType, spin_averaged_matrix_element
+
+
+def differential_cross_section(com_energy:float, no_events:int, no_particles:int, masses, theory, constants, obs_fun):
     """
     Produces a differential cross-section graph by observable 'obs_fun' in scattering of no_particles massless particles using Monte Carlo integration and rambo phase space generator.
 
@@ -14,6 +18,8 @@ def differential_cross_section(com_energy:float, no_events:int, no_particles:int
     no_events (int): Number of Monte Carlo events to generate.
     no_particles (int): Number of particles involved in scattering.
     masses (np.nd.array): 1D array of masses of n particles.
+    theory (str): "phi" or "yukawa" to specify which theory to use for matrix element calculation.
+    constants (dict): Dictionary of theory constants, m_phi, m_psi, lambda_0, g.
     obs_fun (function): Function of observable to measure/plot.
 
     Returns:
@@ -39,7 +45,16 @@ def differential_cross_section(com_energy:float, no_events:int, no_particles:int
         #if i < 10:
         #    print(p_event)
 
-        me_sq = mc.calculate_matrix_element(p_event)
+        if theory == "phi":
+            me_sq = calculate_matrix_element(p_event, constants['m_phi'], constants['lambda_0'])
+        elif theory == "yukawa":
+            p_event_type = [{"type": FieldType.PSI,    "p": p_event[0], "incoming": True},
+                       {"type": FieldType.PSIBAR, "p": p_event[1], "incoming": True},
+                        {"type": FieldType.PHI,    "p": p_event[2], "incoming": False},
+                        {"type": FieldType.PHI,    "p": p_event[3], "incoming": False},]
+
+            me_sq = spin_averaged_matrix_element(p_event_type, constants['m_phi'], constants['m_psi'], constants['g'])
+        
         obs_val = obs_fun(p_event)
         #print(f"Event {i+1}/{no_events}: |M|^2 = {me_sq}, weight = {weight_m}, observable = {obs_val}")
         ctheta_min=-0.95
@@ -85,9 +100,16 @@ def differential_cross_section(com_energy:float, no_events:int, no_particles:int
     return
 
 
-
-print(differential_cross_section(1000, 200000, 4, masses = np.array([100, 100, 100, 100]), obs_fun = obs.cos_theta)) #np.array([100, 100, 100, 100])
-plt.show()
+if __name__ == "__main__":
+    m_phi = 10
+    m_psi = 10
+    g = 1
+    lambda_0 = 1
+    constants = {'m_phi': m_phi, 'm_psi': m_psi, 'lambda_0': lambda_0, 'g': g}
+    print(differential_cross_section(1000, 100000, 4, np.array([m_phi, m_phi, m_phi, m_phi]), "phi", constants, obs.cos_theta))
+    plt.show()
+    print(differential_cross_section(1000, 100000, 4, np.array([m_psi, m_psi, m_phi, m_phi]), "yukawa", constants, obs.cos_theta))
+    plt.show()
 
 
 #caption("Differential Cross Section dσ/dcosθ in 2 -> 2 Scattering"), n = 4, masses = None, "cosθ from angle between p1 and z-axis/p3"
