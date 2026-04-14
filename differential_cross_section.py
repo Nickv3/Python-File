@@ -34,6 +34,8 @@ def differential_cross_section(com_energy:float, no_events:int, no_particles:int
 
     # Calculate weighted sum of matrix element squared * observable value
     for i in range(no_events):
+        if i % 100 == 0:
+            print(f"Processing event {i+1}/{no_events}...")
         # incoming momenta (2 particles)
         p_in = mc.incoming_momenta(com_energy, masses_in)
 

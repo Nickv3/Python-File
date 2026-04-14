@@ -49,21 +49,70 @@ def slash(p):
     return (gamma0 * E - gamma1 * px - gamma2 * py - gamma3 * pz)
 
 
+def photon_polarization(p, helicity):
+    return np.array(p, dtype=complex)
+def photon_polarization_0(p, helicity):
+    px, py, pz = p[1:]
+    k = np.array([px, py, pz])
+    k_norm = np.linalg.norm(k)
+    if k_norm == 0:
+        raise ValueError("Photon momentum cannot be zero")
+    k = k / k_norm
 
-def dirac_spinor_u(p, m_psi, spin):
+    # Arbitrary reference vector, z direction unless photon close to z-axis, then x to avoid 0 cross products.
+    if abs(k[2]) < 0.9:
+        ref = np.array([0,0,1])
+    else:
+        ref = np.array([1,0,0])
+
+    # Transverse basis (e1, e2) orthogonal to k
+    e1 = np.cross(k, ref)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(k, e1)
+
+    # Helicity states
+    if helicity == +1:
+        eps_spatial = (e1 + 1j * e2) / np.sqrt(2)
+    elif helicity == -1:
+        eps_spatial = (e1 - 1j * e2) / np.sqrt(2)
+    else:
+        raise ValueError("Helicity must be ±1")
+    
+    return np.array([0, *eps_spatial], dtype=complex)
+
+
+def helicity_spinor(p, helicity):
+    px, py, pz = p[1:]
+    p_norm = np.linalg.norm([px, py, pz])
+    if p_norm == 0:
+        raise ValueError("Momentum cannot be zero")
+
+    # angles
+    theta = np.arccos(pz / p_norm)
+    phi = np.arctan2(py, px)
+
+    # Chi spinors for helicity states
+    if helicity == +1: # chi+ = (cos(theta/2), exp(i*phi)*sin(theta/2))^T
+        return np.array([[np.cos(theta/2)], [np.exp(1j*phi)*np.sin(theta/2)]], dtype=complex)
+    elif helicity == -1: # chi- = (-sin(theta/2), exp(i*phi)*cos(theta/2))^T
+        return np.array([[-np.sin(theta/2)], [np.exp(1j*phi)*np.cos(theta/2)]], dtype=complex)
+    else:
+        raise ValueError("Helicity must be ±1")
+
+def dirac_spinor_u(p, m_psi, helicity):
     """
     Calculates the Dirac spinor u(p,s) for an external fermion current in the Dirac basis.
 
     Parameters:
     p (np.ndarray): four-momentum [E, px, py, pz], abs(E) input so crossing does not give complex spinors
     m_psi (float): mass of the fermion field ψ/ψ̄ 
-    spin (int): spin state (0 or 1)
+    helicity (int): helicity state (±1)
 
     Returns:
     u(p,s) (np.ndarray): external fermion current u in Dirac basis. Output shape (4,1).
     """
     E, px, py, pz = p
-    chi = np.array([[1],[0]]) if spin == 0 else np.array([[0],[1]])
+    chi = helicity_spinor(p, helicity)
 
     sigma_dot_p = np.array([
         [pz, px - 1j*py],
@@ -75,20 +124,20 @@ def dirac_spinor_u(p, m_psi, spin):
 
     return np.vstack([upper, lower])
 
-def dirac_spinor_v(p, m_psi, spin):
+def dirac_spinor_v(p, m_psi, helicity):
     """
     Calculates the Dirac spinor v(p,s) for an outgoing antifermion in the Dirac basis. Later conjugate and transpose to get vbar = v†γ^0 for the external antifermion current.
 
     Params:
     p (np.ndarray): four-momentum [E, px, py, pz], abs(E) input so crossing does not give complex spinors
     m_psi (float): mass of the fermion field ψ/ψ̄ 
-    spin (int): spin state (0 or 1)
+    helicity (int): helicity state (±1)
 
     Returns:
     v(p,s) (np.ndarray): outgoing antifermion current v in Dirac basis. Output shape (4,1)
     """
     E, px, py, pz = p
-    chi = np.array([[1],[0]]) if spin == 0 else np.array([[0],[1]])
+    chi = helicity_spinor(p, -helicity)
 
     sigma_dot_p = np.array([
         [pz, px - 1j*py],
@@ -99,13 +148,6 @@ def dirac_spinor_v(p, m_psi, spin):
     lower = eta * chi
 
     return np.vstack([upper, lower])
-
-def photon_polarization(p, helicity):
-    # Simple choice of polarization vectors for now, for a photon moving in the z direction with helicity ±1.
-    if helicity == 0:
-        return np.array([0,1,0,0], dtype=complex)
-    else:
-        return np.array([0,0,1,0], dtype=complex)
 
 # FieldType class assigns names to indices of different fields.
 class FieldType(Enum):
@@ -177,6 +219,7 @@ class Current:
         """
         p_new = self.p + other.p
 
+        #CHECK if - sign needed vertices in -ee_f(gamma^mu)_alpha_beta
         # ψ + ψ̄ → A_μ
         if self.type == FieldType.PSI and other.type == FieldType.PSIBAR:
             j_mu = np.zeros(4, dtype=complex)
@@ -215,7 +258,7 @@ class Current:
 
 
 # External currents, classified by field type and contains the spinor current (or 1 for scalars) and momentum information for the external particles.
-def external_current(field_type, p, m_psi, incoming, crossed, spin=None):
+def external_current(field_type, p, m_psi, incoming, crossed, helicity=None):
     """
     Creates a current object for an external particle based on its field type, momentum, and spinor current (for fermions).
 
@@ -224,30 +267,30 @@ def external_current(field_type, p, m_psi, incoming, crossed, spin=None):
     p (np.ndarray): four-momentum [E, px, py, pz]
     m_psi (float): mass of the fermion field ψ/ψ̄ 
     incoming (bool): whether the particle is incoming or outgoing, to determine which u/v spinor to construct
-    spin (int): spin state (0 or 1)
+    helicity (int): helicity state (±1)
 
     Returns:
     Combined current object with new type, current value and momentum.
     """
-    #print(f"field_type={field_type}, spin={spin}, incoming={incoming}")
+    #print(f"field_type={field_type}, helicity={helicity}, incoming={incoming}")
     #print(crossed)
-    if crossed == True: # Ensure crossed particles are calculated correctly, using original momentum but new type.
-        p_spinor = -p
+    if crossed == True: # Ensure crossed particles are calculated correctly, using energy component but new type and vector (helicity flipped globally).
+        p_spinor = np.array([-p[0], p[1], p[2], p[3]])
     else:
         p_spinor = p
 
     if field_type == FieldType.A:
-        eps = photon_polarization(p, spin) # photon polarisation vector, with spin used as helicity for now.
+        eps = photon_polarization(p_spinor, helicity) # photon polarisation vector
         return Current(FieldType.A, eps, p)
 
     if field_type == FieldType.PSI:
-        u = dirac_spinor_u(p_spinor, m_psi, spin)
+        u = dirac_spinor_u(p_spinor, m_psi, helicity)
         if incoming == False:
             u = u.conj().T @ gamma0 # ubar = u†γ^0 is the external current for outgoing fermions (shape 1x4/row vector)
         return Current(FieldType.PSI, u, p)
 
     if field_type == FieldType.PSIBAR:
-        v = dirac_spinor_v(p_spinor, m_psi, spin)
+        v = dirac_spinor_v(p_spinor, m_psi, helicity)
         if incoming == True:
             v = v.conj().T @ gamma0 # vbar = v†γ^0 is the external current for incoming antifermions (shape 1x4/row vector)
         return Current(FieldType.PSIBAR, v, p)
@@ -284,7 +327,7 @@ def index_subsets(indices):
 
 def calculate_amplitude(external_currents, m_psi, e):
     """
-    Calculates the matrix element M for a given set of external particles with given spin state using B-G recursion.
+    Calculates the matrix element M for a given set of external particles with given helicity state using B-G recursion.
 
     Parameters:
     external_currents (list of Current objects): list of external currents for each particle
@@ -292,7 +335,7 @@ def calculate_amplitude(external_currents, m_psi, e):
     e (float): coupling constant for QED interaction
 
     Returns:
-    M (float): complex M for the given external particles and spin states
+    M (float): complex M for the given external particles and helicity states
     """
     n = len(external_currents) - 1
     single_current = external_currents[0]
@@ -373,22 +416,20 @@ def calculate_amplitude(external_currents, m_psi, e):
 
     elif single_current.type == FieldType.A and final_current.type == FieldType.A: #incoming photon and outgoing photon
         metric = np.diag([1, -1, -1, -1])
-        M = np.sum(metric * single_current.current * final_current.current)
+        M = single_current.current @ metric @ final_current.current
 
     else:
         raise ValueError(f"Invalid final contraction structure {single_current.type} with {final_current.type}")
-    #print(f"M = {M}")
+    print(f"M = {abs(M)}")
     return M
 
-def spin_averaged_matrix_element(external_points, m_psi, e):
+def helicity_averaged_matrix_element(external_points, m_psi, e):
     """
-    Calculates the squared and spin-summed matrix element |M|^2 for a given set of external particles using B-G recursion.
+    Calculates the squared and helicity-averaged matrix element |M|^2 for a given set of external particles using B-G recursion.
 
-    Changes to be made:
-    Currently assumes all particles are outgoing, and the first two particles in the external_points list are the initial state particles (the 2nd of which will be conjugated for the current construction).
-    Currently assumes only 2 spin states (0/up and 1/down).
-    Currently assumes all particles are distinguishable, so no symmetry factors are included.
-    Currently assumes overall spin and fermion (baryon/lepton?) number conservation.
+    Constraints:
+    Currently assumes only 2 helicity states (+1,-1).
+    Currently assumes overall helicity and fermion (baryon/lepton?) number conservation.
 
     Parameters:
     external_points (list of dict): list of external particles with their type and momentum, e.g. [{"type": FieldType.PSI, "p": p0}, ...]
@@ -396,13 +437,15 @@ def spin_averaged_matrix_element(external_points, m_psi, e):
     e (float): coupling constant for QED interaction
 
     Returns:
-    M_sq_av (float): squared and spin-summed matrix element |M|^2 for the given external particles
+    M_sq_av (float): squared and helicity-averaged matrix element |M|^2 for the given external particles
     """
-    # Determines the number of initial (anti-)fermions based on the external_points list, and generates all possible spin configurations for them.
-    initial_fermion_indices = [i for i, pt in enumerate(external_points) if (pt["type"] in (FieldType.PSI, FieldType.PSIBAR)) and (pt["incoming"] == True)]
+    # Determines the number of initial (anti-)fermions based on the external_points list, and generates all possible helicity configurations for them.
+    initial_indices = [i for i, pt in enumerate(external_points) if pt["incoming"]] # Now all incoming and outgoing particles have a helicity as no scalars
+    final_indices = [i for i, pt in enumerate(external_points)if not pt["incoming"]]
     #print(len(initial_fermion_indices))
-    spin_configs = list(product([0,1], repeat=len(initial_fermion_indices)))
-    #print(spin_configs)
+    all_indices = initial_indices + final_indices
+    helicity_configs = list(product([+1,-1], repeat=len(all_indices))) #Fermions and photons all have 2 helicity states
+    #print(helicity_configs)
 
     crossed_points = []
     for i, pt in enumerate(external_points):
@@ -419,32 +462,32 @@ def spin_averaged_matrix_element(external_points, m_psi, e):
                 field_type = FieldType.PSIBAR
             elif field_type == FieldType.PSIBAR:
                 field_type = FieldType.PSI
-            incoming = False
-            crossed = True
-            crossed_points.append({"p": p, "type": field_type, "incoming": incoming, "crossed": crossed})
+            crossed_points.append({"p": p, "type": field_type, "incoming": False, "crossed": True})
             continue
         crossed_points.append({"p": p, "type": field_type, "incoming": incoming, "crossed": False})
         
     # Loop over spins of initial (anti-)fermions
     total_M_sq = 0.0
-    for spins in spin_configs:
-        #print("Running spin config:", spins)
-        spin_dict = dict(zip(initial_fermion_indices, spins))
+    for helicity_set in helicity_configs:
+        #print("Running helicity config:", helicity)
+        helicity_dict = {}
+        for i, h in zip(all_indices, helicity_set):
+            if crossed_points[i]["crossed"]:
+                helicity_dict[i] = -h   # flip here
+            else:
+                helicity_dict[i] = h
 
         external_currents = []
 
         for i, pt in enumerate(crossed_points):
-            if i in spin_dict:
-                current = external_current(pt["type"], pt["p"], m_psi, pt["incoming"], pt["crossed"], spin=spin_dict[i])
-            else:
-                current = external_current(pt["type"], pt["p"], m_psi, pt["incoming"], pt["crossed"])
-
+            current = external_current(pt["type"], pt["p"], m_psi, pt["incoming"], pt["crossed"], helicity=helicity_dict[i])
             external_currents.append(current)
         #print(external_currents)
+        print(helicity_dict)
         M = calculate_amplitude(external_currents, m_psi, e)
 
         total_M_sq += abs(M)**2
-    M_sq_av = total_M_sq / (2 ** len(initial_fermion_indices))
+    M_sq_av = total_M_sq / (2 ** len(initial_indices))
     return M_sq_av
 
 
@@ -456,6 +499,12 @@ if __name__ == "__main__":
 
     p0 = np.array([E, 0, 0,  p])
     p1 = np.array([E, 0, 0, -p])
+    print(p0)
+    eps = photon_polarization(p0, helicity=+1)
+    eps1 = photon_polarization(p0, helicity=-1)
+    if False:
+        None
+
     if True:
         theta = np.pi / 4
         p2 = np.array([E,  p*np.sin(theta), 0,  p*np.cos(theta)])
@@ -467,9 +516,9 @@ if __name__ == "__main__":
             {"type": FieldType.A,    "p": p2, "incoming": False},
             {"type": FieldType.A,    "p": p3, "incoming": False},
             ]
-        print(spin_averaged_matrix_element(external_points22, m_psi, e))
+        print(helicity_averaged_matrix_element(external_points22, m_psi, e))
 
-    if True:
+    if False:
         E_A = 2*E/3
         k = np.sqrt(E_A**2 - 0**2)
         p2 = np.array([E_A,  k,                 0, 0])
@@ -483,4 +532,5 @@ if __name__ == "__main__":
             {"type": FieldType.A,    "p": p3, "incoming": False},
             {"type": FieldType.A,    "p": p4, "incoming": False}
             ]
-        print(spin_averaged_matrix_element(external_points23, m_psi, e))
+        print(helicity_averaged_matrix_element(external_points23, m_psi, e))
+

@@ -3,6 +3,7 @@ experimental_code.ipynb
 archive.ipynb
 graphs.py
 testing_yukawa.ipynb
+testing_qed.ipynb
 
 # Folders to ignore
 myenv/
