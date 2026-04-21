@@ -39,6 +39,7 @@ def gamma_matrices():
 gamma0, gamma1, gamma2, gamma3 = gamma_matrices()
 gammas = [gamma0, gamma1, gamma2, gamma3]   # gamma^mu
 gamma_array = np.array(gammas)              # shape (4,4,4)
+C = 1j * gamma2 @ gamma0                    # Charge conjugation matrix, used in Majorana fermion construction if needed later. Satisfies C γ^μ C^{-1} = - (γ^μ)^T and C^T = -C.
 metric = np.diag([1., -1., -1., -1.])       # g^{mu nu}
 
 ref_candidates = [
@@ -118,7 +119,7 @@ def photon_polarization(p, spin):
     
     return np.array([0, eps_spatial[0], eps_spatial[1], eps_spatial[2]], dtype=complex) # shape (4,)
 
-def ward_test(external_points, m_psi, e, photon_index):
+def ward_test(external_points, masses_psi, e, photon_index):
     """
     Replace polarization vector with momentum and check amplitude → 0
     """
@@ -128,7 +129,7 @@ def ward_test(external_points, m_psi, e, photon_index):
         if i == photon_index:
             new_pt["force_momentum_polarization"] = True
         test_points.append(new_pt)
-    return spin_averaged_matrix_element(test_points, m_psi, e)
+    return spin_averaged_matrix_element(test_points, masses_psi, e)
 
 
 def dirac_spinor_u(p, m_psi, spin):
@@ -137,7 +138,7 @@ def dirac_spinor_u(p, m_psi, spin):
 
     Parameters:
     p (np.ndarray): four-momentum [E, px, py, pz], E always positive input so crossing does not give complex spinors
-    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    m_psi (float): mass of the fermion field ψ/ψ̄
     spin (int): spin state (0/down or 1/up)
 
     Returns:
@@ -158,7 +159,7 @@ def dirac_spinor_v(p, m_psi, spin):
 
     Params:
     p (np.ndarray): four-momentum [E, px, py, pz], E always positive input so crossing does not give complex spinors
-    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    m_psi (float): mass of the fermion field ψ/ψ̄
     spin (int): spin state (0/down or 1/up)
 
     Returns:
@@ -172,6 +173,21 @@ def dirac_spinor_v(p, m_psi, spin):
     upper = (sigma_dot_p @ chi) / eta
     lower = eta * chi
     return np.vstack([upper, lower])
+
+def merge_sign(labels_a, labels_b):
+    """
+    Get the sign from anticommuting fermion operators when placing A's operators before B's operators.
+    Ensure the correct sign is applied based on the ordering of fermion labels as you would have when adding feynman diagrams
+
+    Parameters:
+    labels_a (tuple): fermion labels for current A
+    labels_b (tuple): fermion labels for current B
+    
+    Returns:
+    int: (-1)^(number of pairs (a,b) with a in labels_a, b in labels_b, a > b) 
+    """
+    count = sum(1 for a in labels_a for b in labels_b if a > b)
+    return 1 if count % 2 == 0 else -1
 
 
 
@@ -192,9 +208,9 @@ allowed_vertices = frozenset({
 
 
 class Current:
-    __slots__ = ('type', 'current', 'p', 'flavour')
+    __slots__ = ('type', 'current', 'p', 'flavour', 'fermion_labels')
 
-    def __init__(self, field_type, current, momentum, flavour=None):
+    def __init__(self, field_type, current, momentum, flavour=None, fermion_labels=()):
         """
         Created a current object for each external particle/combined current, and assign parameters as its values.
 
@@ -204,14 +220,16 @@ class Current:
         current (np.ndarray or float): the current value ((4,) 4-vector for A and (4,1)/(1,4) spinors/matrices for PSI/PSIBARs)
         momentum (np.ndarray): four-momentum [E, px, py, pz]
         flavour (str): flavour of the current
+        fermion_labels (tuple): tuple of fermion labels for the current, used to determine signs when combining currents with anticommuting fermions. Should be empty for photons.
 
         Returns:
         Current object with specified type, current value, momentum and flavour.
         """
-        self.type       = field_type
-        self.current    = current   # (4,) A or [(4,1) or (1,4)]ψ/ψ̄  array depending on field type
-        self.p          = np.asarray(momentum, float)
-        self.flavour    = flavour
+        self.type           = field_type
+        self.current        = current   # (4,) A or [(4,1) or (1,4)]ψ/ψ̄  array depending on field type
+        self.p              = np.asarray(momentum, float)
+        self.flavour        = flavour
+        self.fermion_labels = fermion_labels
 
     def propagate(self, m_psi, epsilon = 1e-12):
         """
@@ -232,14 +250,14 @@ class Current:
         # Photon propagator: D(p) = (-i g^{μν}) / (p^2 + iε)
         if self.type == FieldType.A:
             D_prop = -1j / (p_sq + 1j * epsilon) # Scalar propagator as metric handled elsewhere.
-            return Current(FieldType.A, D_prop * self.current, p, self.flavour)
+            return Current(FieldType.A, D_prop * self.current, p, self.flavour, self.fermion_labels)
 
         # Dirac/vector/fermion propagator: S(p) = i (p-slash + m) / (p^2 - m^2 + iε)
         S_prop = 1j * (slash(p) + m_psi * np.eye(4, dtype=complex)) / (p_sq - m_psi**2 + 1j * epsilon) # Shape (4,4) matrix
         if self.type == FieldType.PSI:
-            return Current(FieldType.PSI, self.current @ S_prop, p, self.flavour)
+            return Current(FieldType.PSI, self.current @ S_prop, p, self.flavour, self.fermion_labels)
         if self.type == FieldType.PSIBAR:
-            return Current(FieldType.PSIBAR, S_prop @ self.current, p, self.flavour)
+            return Current(FieldType.PSIBAR, S_prop @ self.current, p, self.flavour, self.fermion_labels)
 
         raise ValueError("Unknown field type")
 
@@ -258,6 +276,10 @@ class Current:
         """
         p_new = self.p + other.p
         st, ot = self.type, other.type
+
+        # Compute fermion anticommutation sign and merged labels
+        new_labels = tuple(sorted(self.fermion_labels + other.fermion_labels))
+        sign = merge_sign(self.fermion_labels, other.fermion_labels)
         
         # ψ + ψ̄ → A_μ
         # J^mu =  ψ γ^mu ψ̄  (as ubar (ψ) and v (ψ̄ ) when outgoing)  with -ve vertex factor  -i e γ^mu
@@ -265,12 +287,12 @@ class Current:
             if self.flavour != other.flavour:
                 raise ValueError("Different flavours")
             J_mu = np.einsum('ij,mjk,kl->m', self.current, gamma_array, other.current)
-            return Current(FieldType.A, -1j * e * J_mu, p_new, flavour=None) # A/photons have no flavour
+            return Current(FieldType.A, sign * (-1j * e) * J_mu, p_new, flavour=None, fermion_labels=new_labels) # A/photons have no flavour
         if st == FieldType.PSIBAR and ot == FieldType.PSI:
             if self.flavour != other.flavour:
                 raise ValueError("Different flavours")
             J_mu = np.einsum('ij,mjk,kl->m', other.current, gamma_array, self.current)
-            return Current(FieldType.A, -1j * e * J_mu, p_new, flavour=None)
+            return Current(FieldType.A, sign * (-1j * e) * J_mu, p_new, flavour=None, fermion_labels=new_labels)
 
         # ψ + A_μ → ψ
         # Vertex: -i e γ^mu ε_mu  acting on the spinor
@@ -278,18 +300,18 @@ class Current:
         # γ^mu ε_mu = γ^0 ε^0 - γ^i ε^i   (lower with g_{munu} if done explicitly)
         if st == FieldType.PSI and ot == FieldType.A:
             sl = slash_eps(other.current)
-            return Current(FieldType.PSI, -1j * e * (self.current @ sl), p_new, self.flavour) # Row: (1,4) @ (4,4). Keep flavour and fermion id as ψ
+            return Current(FieldType.PSI, sign * (-1j * e) * (self.current @ sl), p_new, self.flavour, fermion_labels=new_labels) # Row: (1,4) @ (4,4). Keep flavour and fermion id as ψ
         if st == FieldType.A and ot == FieldType.PSI:
             sl = slash_eps(self.current)
-            return Current(FieldType.PSI, -1j * e * (other.current @ sl), p_new, other.flavour)
+            return Current(FieldType.PSI, sign * (-1j * e) * (other.current @ sl), p_new, other.flavour, fermion_labels=new_labels)
 
         # ψ̄ + A_μ → ψ̄
         if st == FieldType.PSIBAR and ot == FieldType.A:
             sl = slash_eps(other.current)
-            return Current(FieldType.PSIBAR, -1j * e * (sl @ self.current), p_new, self.flavour) # Column: (4,4) @ (4,1). Keep flavour and fermion id as ψ̄ 
+            return Current(FieldType.PSIBAR, sign * (-1j * e) * (sl @ self.current), p_new, self.flavour, fermion_labels=new_labels) # Column: (4,4) @ (4,1). Keep flavour and fermion id as ψ̄ 
         if st == FieldType.A and ot == FieldType.PSIBAR:
             sl = slash_eps(self.current)
-            return Current(FieldType.PSIBAR, -1j * e * (sl @ other.current), p_new, other.flavour)
+            return Current(FieldType.PSIBAR, sign * (-1j * e) * (sl @ other.current), p_new, other.flavour, fermion_labels=new_labels)
 
 
         raise ValueError(f"Invalid QED vertex: {st} + {ot}")
@@ -373,13 +395,13 @@ def index_subsets(indices):
     return subsets
 
 
-def calculate_amplitude(external_currents, m_psi, e):
+def calculate_amplitude(external_currents, masses_psi, e):
     """
     Calculates the matrix element M for a given set of external particles with given spin state using B-G recursion.
 
     Parameters:
     external_currents (list of Current objects): list of external currents for each particle
-    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    masses_psi (dict): masses of the fermion field ψ/ψ̄  for different flavours
     e (float): coupling constant for QED interaction
 
     Returns:
@@ -392,8 +414,24 @@ def calculate_amplitude(external_currents, m_psi, e):
     #for c in external_currents:
     #    print(c.type, c.current, c.flavour, c.p)
 
-    # Single Particle Currents:
-    J = {(i,): pt for i, pt in enumerate(other_curr)}
+    # Assign fermion labels: unique integer per fermion, in order of appearance.
+    # Bosons (photons) get empty labels.
+    fermion_counter = 0
+    if single_curr.type != FieldType.A:
+        single_labels = (fermion_counter,)
+        fermion_counter += 1
+    else:
+        single_labels = ()
+    
+    # Other Particle Currents (with fermion labels assigned):
+    J = {}
+    for i, pt in enumerate(other_curr):
+        if pt.type != FieldType.A:
+            fl = (fermion_counter,)
+            fermion_counter += 1
+        else:
+            fl = ()
+        J[(i,)] = Current(pt.type, pt.current, pt.p, pt.flavour, fermion_labels=fl)
 
     # Build multi-particle currents
     for no_pt in range(2, n + 1): # no_pt is the number of particles in the current being constructed, starting from 2 up to n
@@ -421,7 +459,7 @@ def calculate_amplitude(external_currents, m_psi, e):
 
                     # Propagate all except final off-shell current.
                     if no_pt < n:
-                        C = C.propagate(m_psi)
+                        C = C.propagate(masses_psi[C.flavour] if C.type != FieldType.A else 0)
 
                     if total is None:
                         total = C
@@ -430,8 +468,8 @@ def calculate_amplitude(external_currents, m_psi, e):
                             raise ValueError("Type mismatch in summation")
                         if total.flavour != C.flavour:
                             raise ValueError("Mixing flavours in summation")
-                        total = Current(C.type, total.current + C.current, C.p, C.flavour)
-
+                        assert total.fermion_labels == C.fermion_labels, f"Fermion label mismatch: {total.fermion_labels} vs {C.fermion_labels}"
+                        total = Current(C.type, total.current + C.current, C.p, C.flavour, C.fermion_labels)
                 except ValueError:
                     #print(f"fail2 for combination: {Ja.type} + {Jb.type}")
                     pass
@@ -444,23 +482,25 @@ def calculate_amplitude(external_currents, m_psi, e):
     final_curr = J[tuple(range(n))]
 
     # Final contraction: contracts n+1 particle off shell "final_curr" with "single_curr" to get M
+    final_sign = merge_sign(final_curr.fermion_labels, single_labels)
+
     if (single_curr.type == FieldType.PSI and final_curr.type == FieldType.PSI
-            and single_curr.flavour == final_curr.flavour): # single incoming u and final outgoing ubar
-        M = (final_curr.current @ single_curr.current)[0,0]
+        and single_curr.flavour == final_curr.flavour): # single incoming u and final outgoing ubar
+        M = final_sign * (final_curr.current @ single_curr.current)[0,0]
 
     elif (single_curr.type == FieldType.PSIBAR and final_curr.type == FieldType.PSIBAR
-            and single_curr.flavour == final_curr.flavour): # single incoming vbar and final outgoing v
-        M = (single_curr.current @ final_curr.current)[0,0]
+          and single_curr.flavour == final_curr.flavour): # single incoming vbar and final outgoing v
+        M =final_sign * (single_curr.current @ final_curr.current)[0,0]
 
     elif single_curr.type == FieldType.A and final_curr.type == FieldType.A: #incoming photon and outgoing photon
-        M = single_curr.current @ metric @ final_curr.current
+        M = final_sign * (single_curr.current @ metric @ final_curr.current)
 
     else:
         raise ValueError(f"Invalid final contraction structure {single_curr.type}, {single_curr.flavour}, \nwith \n{final_curr.type}, {final_curr.flavour}")
     #print(f"M = {abs(M)}")
     return M
 
-def spin_averaged_matrix_element(external_points, m_psi, e):
+def spin_averaged_matrix_element(external_points, masses_psi, e):
     """
     Calculates the squared and spin-averaged matrix element |M|^2 for a given set of external particles using B-G recursion.
 
@@ -470,12 +510,26 @@ def spin_averaged_matrix_element(external_points, m_psi, e):
 
     Parameters:
     external_points (list of dict): list of external particles with their type and momentum, e.g. [{"type": FieldType.PSI, "p": p0}, ...]
-    m_psi (float): mass of the fermion field ψ/ψ̄ 
+    masses_psi (dict): masses of the fermion field ψ/ψ̄  for different flavours
     e (float): coupling constant for QED interaction
 
     Returns:
     M_sq_av (float): squared and spin-averaged matrix element |M|^2 for the given external particles
     """
+    # Test for energy-momentum conservation: 
+    #p_total = sum(pt["p"] * (1 if pt["incoming"] else -1) for pt in external_points)
+    #assert np.allclose(p_total, 0, atol=1e-8), f"Momentum not conserved: {p_total}"
+    
+    def _canonical_key(pt):
+        """"Canonical sort ensures consistent fermion labelling."""
+        return (
+            not pt["incoming"],          # incoming first
+            pt["type"] == FieldType.A,   # fermions before photons
+            pt["type"].value,            # PSI before PSIBAR
+            tuple(pt["p"]),              # then by momentum components
+        )
+    external_points = sorted(external_points, key=_canonical_key)
+
     crossed_points = []
     for i, pt in enumerate(external_points):
         p           = pt["p"].copy() # Leave original unchanged.
@@ -520,7 +574,7 @@ def spin_averaged_matrix_element(external_points, m_psi, e):
     for i in range(n_particles):
         spin_map = {}
         for s in (0, 1):
-            spin_map[s] = external_current(pt_types[i], pt_momenta[i], m_psi,
+            spin_map[s] = external_current(pt_types[i], pt_momenta[i], masses_psi[pt_flavour[i]] if pt_flavour[i] is not None else 0,
                                            pt_incoming[i], spin=s,
                                            flavour=pt_flavour[i],
                                            crossed=pt_crossed[i],
@@ -531,14 +585,14 @@ def spin_averaged_matrix_element(external_points, m_psi, e):
     total_M_sq = 0.0
     for spins in spin_configs:
         external_currents = [precomputed[i][spins[all_indices[i]]] for i in range(n_particles)]
-        M = calculate_amplitude(external_currents, m_psi, e)
+        M = calculate_amplitude(external_currents, masses_psi, e)
         total_M_sq += abs(M)**2
     #for spins in spin_configs:
     if False:
         #print("Running spin config:", spins)
         external_currents = []
         for i in range(n_particles):
-            cur = external_current(pt_types[i], pt_momenta[i], m_psi,
+            cur = external_current(pt_types[i], pt_momenta[i], masses_psi[pt_flavour[i]] if pt_flavour[i] is not None else 0,
                                    pt_incoming[i], spin=spins[all_indices[i]],
                                    flavour=pt_flavour[i],
                                    crossed=pt_crossed[i],
@@ -548,105 +602,75 @@ def spin_averaged_matrix_element(external_points, m_psi, e):
         #for xyz in external_currents:
         #    print(xyz.type, xyz.flavour, xyz.current.shape)
 
-        M = calculate_amplitude(external_currents, m_psi, e)
+        M = calculate_amplitude(external_currents, masses_psi, e)
         total_M_sq += abs(M)**2
     M_sq_av = total_M_sq / (2 ** initial_indices)
     return M_sq_av
 
-def matrix_element_ee_to_ee(p0, p1, k1, k2, m, e):
-    """
-    Spin-summed |M|^2 for e⁻(p0) e⁺(p1) → e⁻(k1) e⁺(k2) in QED.
-    t-channel + s-channel photon exchange (Bhabha scattering).
-    Averages over 4 initial spin states.
-    """
-    def photon_prop(q):
-        q_sq = q[0]**2 - np.dot(q[1:], q[1:])
-        return -1j / q_sq  # Feynman gauge: -i g^{mu nu} / q^2
-
-    total = 0.0
-    for s1, s2, s3, s4 in product([0,1], repeat=4):
-        u_p0    = dirac_spinor_u(p0, m, s1)
-        v_p1    = dirac_spinor_v(p1, m, s2)
-        vbar_p1 = v_p1.conj().T @ gamma0
-        u_k1    = dirac_spinor_u(k1, m, s3)
-        ubar_k1 = u_k1.conj().T @ gamma0
-        v_k2    = dirac_spinor_v(k2, m, s4)
-
-        # t-channel (q = p0 - k1): photon exchanged between e- line and e+ line
-        # [ū(k1)(-ieγ^μ)u(p0)] × (-ig_{μν}/q²) × [v̄(p1)(-ieγ^ν)v(k2)]
-        # Contract over mu with metric: sum_mu η_μμ × (current1^μ)(current2^μ)
-        q_t = p0 - k1
-        D_t = photon_prop(q_t)
-        j1_t = np.array([(ubar_k1 @ gammas[mu] @ u_p0)[0,0] for mu in range(4)])
-        j2_t = np.array([(vbar_p1 @ gammas[mu] @ v_k2)[0,0] for mu in range(4)])
-        M_t = (-1j*e)**2 * D_t * (j1_t @ metric @ j2_t)
-
-        # s-channel (q = p0 + p1): e-e+ annihilate into photon, then photon → e-e+
-        # [v̄(p1)(-ieγ^μ)u(p0)] × (-ig_{μν}/q²) × [ū(k1)(-ieγ^ν)v(k2)]
-        q_s = p0 + p1
-        D_s = photon_prop(q_s)
-        j1_s = np.array([(vbar_p1 @ gammas[mu] @ u_p0)[0,0] for mu in range(4)])
-        j2_s = np.array([(ubar_k1 @ gammas[mu] @ v_k2)[0,0] for mu in range(4)])
-        M_s = (-1j*e)**2 * D_s * (j1_s @ metric @ j2_s)
-
-        M = M_t - M_s  # relative minus from Fermi statistics
-        total += abs(M)**2
-
-    return total / 4.0
-
 
 if __name__ == "__main__":
     E = 1000
-    m_psi = 0
+    masses_psi = {"electron": 0.000511, "muon": 0.10566, "tau": 1.77686} # GeV
     e = 1
-    p = np.sqrt(E**2 - m_psi**2)
+    p = np.sqrt(E**2 - masses_psi["electron"]**2)
 
-    p0 = np.array([E, 0, 0,  p])
-    p1 = np.array([E, 0, 0, -p])
+    p0 = np.array([E/2, 0, 0,  p])
+    p1 = np.array([E/2, 0, 0, -p])
 
-    if True:
+    if False:
         theta = np.pi / 4
-        p2 = np.array([E,  E*np.sin(theta), 0,  E*np.cos(theta)])
-        p3 = np.array([E, -E*np.sin(theta), 0, -E*np.cos(theta)])
-        external_points_ee_to_gg = [
-            {"type": FieldType.PSI,     "p": p0, "incoming": True,  "flavour": "e"},
-            {"type": FieldType.PSIBAR,  "p": p1, "incoming": True,  "flavour": "e"},
-            {"type": FieldType.A,     "p": p2, "incoming": False},
-            {"type": FieldType.A,  "p": p3, "incoming": False},
-            ]
+        EE = E
+        p2 = np.array([EE,  EE*np.sin(theta), 0,  EE*np.cos(theta)])
+        p3 = np.array([EE, -EE*np.sin(theta), 0, -EE*np.cos(theta)])
+
+        external_points_bhabha = [
+            {"type": FieldType.PSI,     "p": p0, "incoming": True,  "flavour": "electron"},
+            {"type": FieldType.PSIBAR,  "p": p1, "incoming": True,  "flavour": "electron"},
+            {"type": FieldType.PSI,     "p": p2, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSIBAR,  "p": p3, "incoming": False, "flavour": "electron"},]
+        print(spin_averaged_matrix_element(external_points_bhabha, masses_psi, e))
+        
+    if False:
+        theta = np.pi / 4
+        EE = E/2
+        p2 = np.array([EE,  EE*np.sin(theta), 0,  EE*np.cos(theta)])
+        p3 = np.array([EE, -EE*np.sin(theta), 0, -EE*np.cos(theta)])
+        p4 = np.array([EE, 0, 0, EE])
+        p5 = np.array([EE, 0, 0, -EE])
+        external_points_ee_to_eeee = [
+            {"type": FieldType.PSI,     "p": p0, "incoming": True,  "flavour": "electron"},
+            {"type": FieldType.PSIBAR,  "p": p1, "incoming": True,  "flavour": "electron"},
+            {"type": FieldType.PSI,     "p": p2, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSIBAR,  "p": p3, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSI,     "p": p4, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSIBAR,  "p": p5, "incoming": False, "flavour": "electron"},]
+    
+    if True:
+        theta = 2 * np.pi / 3
+        phase = np.pi / 4
+        EE = E/3
+        p2 = np.array([EE, EE*np.sin(phase), 0,  EE*np.cos(phase)])
+        p3 = np.array([EE, EE*np.sin(theta + phase), 0, EE*np.cos(theta + phase)])
+        p4 = np.array([EE, EE*np.sin(2*theta + phase), 0, EE*np.cos(2*theta + phase)])
+        external_points_eg_to_eee = [
+            {"type": FieldType.PSI,     "p": p0, "incoming": True,  "flavour": "electron"},
+            {"type": FieldType.A,       "p": p1, "incoming": True},
+            {"type": FieldType.PSI,     "p": p2, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSIBAR,  "p": p3, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSI,     "p": p4, "incoming": False, "flavour": "electron"},]
+        
+        external_points_ge_to_eee = [
+            {"type": FieldType.A,       "p": p1, "incoming": True},
+            {"type": FieldType.PSI,     "p": p0, "incoming": True,  "flavour": "electron"},
+            {"type": FieldType.PSI,     "p": p2, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSIBAR,  "p": p3, "incoming": False, "flavour": "electron"},
+            {"type": FieldType.PSI,     "p": p4, "incoming": False, "flavour": "electron"},]
 
         #print("Ward test photon 2:", ward_test(external_points_ee_to_gg, m_psi, e, 2))
         #print("Ward test photon 3:", ward_test(external_points_ee_to_gg, m_psi, e, 3))        
         
-        matrix_element_BG = spin_averaged_matrix_element(external_points_ee_to_gg, m_psi, e)
-        
+        ge = spin_averaged_matrix_element(external_points_ge_to_eee, masses_psi, e)
+        print(f'PSI crossed: {ge}')
+        eg = spin_averaged_matrix_element(external_points_eg_to_eee, masses_psi, e)
+        print(f'A crossed: {eg}')
         #print(f"Matrix element from B-G recursion: {matrix_element_BG}")
-
-    if False:
-        E_A = 2*E/3
-        k = np.sqrt(E_A**2 - 0**2)
-        p2 = np.array([E_A,  k,                 0, 0])
-        p3 = np.array([E_A, -k/2,  np.sqrt(3)*k/2, 0])
-        p4 = np.array([E_A, -k/2, -np.sqrt(3)*k/2, 0])
-        momenta23 = (p0, p1, p2, p3, p4)
-        external_points23 = [
-            {"type": FieldType.PSI,    "p": p0, "incoming": True},
-            {"type": FieldType.PSIBAR, "p": p1, "incoming": True},
-            {"type": FieldType.A,    "p": p2, "incoming": False},
-            {"type": FieldType.A,    "p": p3, "incoming": False},
-            {"type": FieldType.A,    "p": p4, "incoming": False}
-            ]
-        print(spin_averaged_matrix_element(external_points23, m_psi, e))
-
-if True:
-    external_points_ee_to_ee = [
-        {"type": FieldType.PSI,    "p": p0, "incoming": True,  "flavour": "e"},
-        {"type": FieldType.PSIBAR, "p": p1, "incoming": True,  "flavour": "e"},
-        {"type": FieldType.PSI,    "p": p2, "incoming": False,  "flavour": "e"},
-        {"type": FieldType.PSIBAR, "p": p3, "incoming": False,  "flavour": "e"},
-    ]
-
-    bg      = spin_averaged_matrix_element(external_points_ee_to_ee, m_psi, e)
-    feynman = matrix_element_ee_to_ee(p0, p1, p2, p3, m_psi, e)
-    print(f"B-G:     {bg:.10f}")
-    print(f"Feynman: {feynman:.10f}")

@@ -3,7 +3,8 @@ import math
 import scipy.special as sp
 from scipy.optimize import brentq
 from currents_phi import calculate_matrix_element
-from currents_yukawa import FieldType, spin_averaged_matrix_element
+from currents_yukawa import FieldType as YFT, spin_averaged_matrix_element as yukawa_matrix_element
+from currents_qed_v2 import FieldType as QFT, spin_averaged_matrix_element as qed_matrix_element
 import observables as obs
 
 def incoming_momenta(com_energy, masses_in):
@@ -59,7 +60,7 @@ def separate_in_and_out(no_particles, masses):
         masses_out = None
     return masses_in, masses_out, no_outgoing
 
-def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, theory, constants, obs_fun):
+def mc_cross_section(com_energy:float, no_events:int, no_particles:int, constants, theory, field_types = None, masses = None, flavours = None, obs_fun = None):
     """
     Estimate the cross-section in scattering of N_particles massless particles using Monte Carlo integration and rambo phase space generator.
 
@@ -67,9 +68,12 @@ def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, 
     com_energy (float): COM energy.
     no_events (int): Number of Monte Carlo events to generate.
     no_particles (int): Number of particles involved in scattering.
-    masses (np.nd.array): 1D array of masses of n particles.
-    theory (str): "phi" or "yukawa" to specify which theory to use for matrix element calculation.
-    constants (dict): Dictionary of theory constants, m_phi, m_psi, lambda_0, g.
+
+    constants (dict): Dictionary of theory constants, m_phi, masses_psi, lambda_0, g, e.
+    theory (str): "phi", "yukawa" or "qed" to specify which theory to use for matrix element calculation.
+    field_types (list): List of particle types (e.g. "scalar", "fermion", "photon") for each particle, used for matrix element calculation. Not used in "phi".
+    masses (np.nd.array): 1D array of masses of n particles. Either m_phi or masses_psi[flavour] for "phi" and "yukawa", and masses_psi[flavour] or 0 for "qed". If all massless set to None.
+    flavours (list): List of particle flavours for each particle, used for matrix element calculation. Not used in "phi" or "yukawa".
     obs_fun (function): Function of observable to measure/plot.
 
     Returns:
@@ -95,13 +99,20 @@ def mc_cross_section(com_energy:float, no_events:int, no_particles:int, masses, 
 
         if theory == "phi":
             me_sq = calculate_matrix_element(p_event, constants['m_phi'], constants['lambda_0'])
-        elif theory == "yukawa":
-            p_event = [{"type": FieldType.PSI,    "p": p_event[0], "incoming": True},
-                       {"type": FieldType.PSIBAR, "p": p_event[1], "incoming": True},
-                        {"type": FieldType.PHI,    "p": p_event[2], "incoming": False},
-                        {"type": FieldType.PHI,    "p": p_event[3], "incoming": False},]
 
-            me_sq = spin_averaged_matrix_element(p_event, constants['m_phi'], constants['m_psi'], constants['g'])
+        elif theory == "yukawa":
+            p_event_type = [{"type": field_types[0], "p": p_event[0], "incoming": True, "flavour": flavours[0]},
+                            {"type": field_types[1], "p": p_event[1], "incoming": True, "flavour": flavours[1]},]
+            for j in range(2, no_particles):
+                p_event_type.append({"type": field_types[j], "p": p_event[j], "incoming": False, "flavour": flavours[j]})
+            me_sq = yukawa_matrix_element(p_event_type, constants['m_phi'], constants['masses_psi'], constants['g'])
+
+        elif theory == "qed":
+            p_event_type = [{"type": field_types[0], "p": p_event[0], "incoming": True, "flavour": flavours[0]},
+                            {"type": field_types[1], "p": p_event[1], "incoming": True, "flavour": flavours[1]},]
+            for j in range(2, no_particles):
+                p_event_type.append({"type": field_types[j], "p": p_event[j], "incoming": False, "flavour": flavours[j]})
+            me_sq = qed_matrix_element(p_event_type, constants['masses_psi'], constants['e'])
         
         obs_val = obs_fun(p_event)
         #print(f"Event {i+1}/{no_events}: |M|^2 = {me_sq}, weight = {weight_m}, observable = {obs_val}")
@@ -269,9 +280,21 @@ def solve_for_xi(w, p, m):
 
 if __name__ == "__main__":
     m_phi = 10
-    m_psi = 10
+    masses_psi = {"electron": 0.000511, "muon": 0.1057, "tau": 1.7768}
     g = 1
     lambda_0 = 1
-    constants = {'m_phi': m_phi, 'm_psi': m_psi, 'lambda_0': lambda_0, 'g': g}
-    print(mc_cross_section(1000, 100000, 4, None, "phi", constants, obs.cross_section))
-    print(mc_cross_section(1000, 100000, 4, np.array([m_psi, m_psi, m_phi, m_phi]), "yukawa", constants, obs.cross_section))
+    constants = {'m_phi': m_phi, 'masses_psi': masses_psi, 'lambda_0': lambda_0, 'g': g}
+    print(mc_cross_section(1000, 100000, 4,
+                           constants=constants,
+                           theory="phi",
+                           field_types=None,
+                           masses=None,
+                           flavours=None,
+                           obs_fun=obs.cross_section))
+    print(mc_cross_section(1000, 100000, 4,
+                           constants=constants,
+                           theory="yukawa",
+                           field_types=[YFT.PSI, YFT.PSIBAR, YFT.PHI, YFT.PHI],
+                           masses=np.array([masses_psi["electron"], masses_psi["electron"], m_phi, m_phi]),
+                           flavours=["electron", "electron", None, None],
+                           obs_fun=obs.cross_section))

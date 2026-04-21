@@ -27,6 +27,13 @@ def cos_theta(p_list):
     return np.dot(p3_vec, z_hat) / np.linalg.norm(p3_vec)
 
 
+def cos_theta_rand(p_list):
+    random_particle_index = np.random.randint(2, len(p_list)) # Randomly select one of the outgoing particles (index 2 or higher)
+    pi = p_list[random_particle_index]               # outgoing particle
+    pi_vec = pi[1:]
+    z_hat = np.array([0,0,1])   # z unit vector = unit vector of p1
+    return np.dot(pi_vec, z_hat) / np.linalg.norm(pi_vec)
+
 # For the angle p1 is from the z-axis O(phi) = phi_p1
 def azimuthal_angle(p_list):
     p_1v = p_list[1,1:]
@@ -61,7 +68,7 @@ class observables:
     pass
 
 import numpy as np
-print(cos_theta(np.array([[10,0,0,1],[1,2,3,4],[5,6,7,8]])))
+#print(cos_theta(np.array([[10,0,0,1],[1,2,3,4],[5,6,7,8]])))
 #print(azimuthal_angle(np.array([[1,2,3,4],[5,6,7,8]])))
 #print(max_particle_energy(np.array([[10,2,3,4],[5,6,7,8],[10.1,0,2,3]])))
 #print(total_invariant_mass(np.array([[100,1,2,3],[50,4,5,6],[100,1,5,7]])))
